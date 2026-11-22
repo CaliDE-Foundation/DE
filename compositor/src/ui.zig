@@ -10,6 +10,19 @@ const render_scale = 2;
 
 var stage: ?*c.ClutterActor = null;
 
+/// Animation speed from settings (1 = normal, 0 = off).
+pub var speed: f32 = 1.0;
+/// Accent color from settings, 0xRRGGBBAA.
+pub var accent: u32 = 0xe2725bff;
+
+/// A duration scaled by the animation speed. Never 0: effects wait for
+/// "transitions-completed", which an instant change wouldn't send.
+pub fn ms(base: c_uint) c_uint {
+    if (speed <= 0.01) return 1;
+    const scaled = @as(f32, @floatFromInt(base)) / speed;
+    return @max(1, @as(c_uint, @intFromFloat(@min(scaled, 10000))));
+}
+
 pub fn init(s: ?*c.ClutterActor) void {
     stage = s;
 }
@@ -99,10 +112,10 @@ pub fn center(child: ?*c.ClutterActor, parent: ?*c.ClutterActor, axis: c_uint) v
 }
 
 /// Starts an easing block; finish it with `c.clutter_actor_restore_easing_state`.
-pub fn ease(actor: ?*c.ClutterActor, ms: c_uint, mode: c_uint) void {
+pub fn ease(actor: ?*c.ClutterActor, duration: c_uint, mode: c_uint) void {
     c.clutter_actor_save_easing_state(actor);
     c.clutter_actor_set_easing_mode(actor, @intCast(mode));
-    c.clutter_actor_set_easing_duration(actor, ms);
+    c.clutter_actor_set_easing_duration(actor, ms(duration));
 }
 
 /// Launches an app inside this session (Sookie's launch context points it at

@@ -115,7 +115,7 @@ fn styleDot(dot: ?*c.ClutterActor, active: bool, animate: bool) void {
     if (animate) {
         c.clutter_actor_save_easing_state(dot);
         c.clutter_actor_set_easing_mode(dot, @intCast(c.CLUTTER_EASE_OUT_QUAD));
-        c.clutter_actor_set_easing_duration(dot, dot_ms);
+        c.clutter_actor_set_easing_duration(dot, @import("ui.zig").ms(dot_ms));
     }
     c.clutter_actor_set_width(dot, if (active) style.active_width else style.size);
     c.clutter_actor_set_opacity(dot, if (active) 255 else style.inactive_opacity);
@@ -302,7 +302,7 @@ pub fn switchWorkspace(p: ?*c.MetaPlugin, from: c_int, to: c_int, _: c.MetaMotio
 
     c.clutter_actor_save_easing_state(layer);
     c.clutter_actor_set_easing_mode(layer, @intCast(c.CLUTTER_EASE_OUT_CUBIC));
-    c.clutter_actor_set_easing_duration(layer, switch_ms);
+    c.clutter_actor_set_easing_duration(layer, @import("ui.zig").ms(switch_ms));
     c.clutter_actor_set_x(layer, -sign * width);
     c.clutter_actor_restore_easing_state(layer);
     plugin.connect(layer, "transitions-completed", &onSlideDone, null);

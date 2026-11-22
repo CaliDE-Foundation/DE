@@ -39,6 +39,8 @@ var dim: ?*c.ClutterActor = null;
 var grab: ?*c.ClutterGrab = null;
 var hot_corner: ?*c.ClutterActor = null;
 var hot_corner_armed = false;
+/// The hot-corner setting.
+pub var hot_corner_enabled = true;
 var entries: [max_windows]Entry = undefined;
 var n_entries: usize = 0;
 var layout_area = c.CaliRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
@@ -111,7 +113,7 @@ fn pointerInCorner() bool {
 }
 
 fn onHotCorner(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    if (hot_corner_armed and pointerInCorner()) {
+    if (hot_corner_enabled and hot_corner_armed and pointerInCorner()) {
         hot_corner_armed = false;
         toggle();
     }
@@ -271,7 +273,7 @@ fn open() void {
 fn ease(actor: ?*c.ClutterActor) void {
     c.clutter_actor_save_easing_state(actor);
     c.clutter_actor_set_easing_mode(actor, @intCast(c.CLUTTER_EASE_OUT_QUAD));
-    c.clutter_actor_set_easing_duration(actor, duration_ms);
+    c.clutter_actor_set_easing_duration(actor, ui.ms(duration_ms));
 }
 
 fn makeCard(parent: ?*c.ClutterActor, actor: *c.ClutterActor, window: *c.MetaWindow, from: c.CaliRect) Entry {

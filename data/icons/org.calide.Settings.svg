@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Cali">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb36b"/>
+      <stop offset="1" stop-color="#ff6f61"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a8dde"/>
+      <stop offset="1" stop-color="#2459b8"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="4" y="4" width="152" height="152" rx="38"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect x="0" y="0" width="160" height="160" fill="url(#sky)"/>
+    <circle cx="80" cy="92" r="36" fill="#fff4d6"/>
+    <path d="M0 96 Q20 86 40 96 T80 96 T120 96 T160 96 V160 H0 Z" fill="url(#sea)"/>
+    <path d="M0 118 Q20 108 40 118 T80 118 T120 118 T160 118 V160 H0 Z" fill="#1d4796" fill-opacity="0.7"/>
+  </g>
+</svg>

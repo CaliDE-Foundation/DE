@@ -1,12 +1,29 @@
 //! The top bar: what it shows. The compositor (Zig) draws it.
 
 use std::ffi::{c_char, c_int, c_long, CStr};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Bar height in logical pixels.
 pub const HEIGHT: u32 = 32;
 
-/// GNOME-style clock: abbreviated month, day, en space, 24-hour time.
-const CLOCK_FORMAT: &CStr = c"%b %-d\u{2002}%H:%M";
+static SHOW_WEEKDAY: AtomicBool = AtomicBool::new(false);
+static SHOW_SECONDS: AtomicBool = AtomicBool::new(false);
+
+/// Sets what the clock shows (settings clock-show-weekday / -seconds).
+pub fn set_clock_options(weekday: bool, seconds: bool) {
+    SHOW_WEEKDAY.store(weekday, Ordering::Relaxed);
+    SHOW_SECONDS.store(seconds, Ordering::Relaxed);
+}
+
+/// GNOME-style clock: [weekday] abbreviated month, day, en space, 24-hour time.
+fn clock_format(weekday: bool, seconds: bool) -> &'static CStr {
+    match (weekday, seconds) {
+        (false, false) => c"%b %-d\u{2002}%H:%M",
+        (false, true) => c"%b %-d\u{2002}%H:%M:%S",
+        (true, false) => c"%a %b %-d\u{2002}%H:%M",
+        (true, true) => c"%a %b %-d\u{2002}%H:%M:%S",
+    }
+}
 
 #[repr(C)]
 struct Tm {
@@ -64,7 +81,8 @@ pub fn format_date(date: Option<(i32, u32, u32)>, format: &CStr) -> String {
 
 /// Current local time formatted for the top bar.
 pub fn clock_text() -> String {
-    format_date(None, CLOCK_FORMAT)
+    let fmt = clock_format(SHOW_WEEKDAY.load(Ordering::Relaxed), SHOW_SECONDS.load(Ordering::Relaxed));
+    format_date(None, fmt)
 }
 
 #[cfg(test)]
@@ -76,6 +94,13 @@ mod tests {
         // Use the C locale's English names: tests don't set a locale.
         assert_eq!(format_date(Some((2026, 11, 22)), c"%A %Y-%m-%d"), "Sunday 2026-11-22");
         assert_eq!(format_date(Some((2024, 2, 29)), c"%a"), "Thu");
+    }
+
+    #[test]
+    fn clock_options_change_the_format() {
+        let day = Some((2026, 11, 22));
+        assert_eq!(format_date(day, clock_format(true, false)).split_whitespace().next(), Some("Sun"));
+        assert!(clock_format(false, true).to_str().unwrap().ends_with("%S"));
     }
 
     #[test]

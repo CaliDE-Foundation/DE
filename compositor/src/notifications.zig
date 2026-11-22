@@ -49,27 +49,7 @@ pub fn init(s: ?*c.ClutterActor) void {
         null,
         null,
     );
-    spawnDaemon();
-}
-
-/// Starts cali-notifyd from the folder cali-compositor runs from.
-fn spawnDaemon() void {
-    var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = std.fs.selfExeDirPath(&dir_buf) catch return;
-    var path_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&path_buf, "{s}/cali-notifyd", .{dir}) catch return;
-    std.fs.accessAbsolute(path, .{}) catch {
-        std.log.info("notifications: {s} not found, banners need another notification server", .{path});
-        return;
-    };
-    var argv = [_:null]?[*:0]u8{ path.ptr, null };
-    var err: ?*c.GError = null;
-    if (c.g_spawn_async(null, @ptrCast(&argv), null, @intCast(c.G_SPAWN_DEFAULT), null, null, null, @ptrCast(&err)) == 0) {
-        if (err) |e| {
-            std.log.warn("notifications: could not start cali-notifyd: {s}", .{e.message});
-            c.g_error_free(e);
-        }
-    }
+    @import("bus.zig").spawnSibling("cali-notifyd");
 }
 
 fn onBusAcquired(conn: ?*c.GDBusConnection, _: [*c]const u8, _: c.gpointer) callconv(.C) void {

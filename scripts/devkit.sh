@@ -39,6 +39,15 @@ exec dbus-run-session -- bash -c '
       WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland $app >>/tmp/app.log 2>&1 &
       sleep 0.7
     done
+    # CALI_DEBUG_CALICTL="set KEY VALUE;...": change settings a bit later.
+    if [ -n "${CALI_DEBUG_CALICTL:-}" ]; then
+      sleep 3
+      IFS=";" read -ra cmds <<< "$CALI_DEBUG_CALICTL"
+      for cmd in "${cmds[@]}"; do
+        echo "devkit: calictl $cmd"
+        "$(dirname "$0")/calictl" $cmd || true
+      done
+    fi
     # CALI_DEBUG_NOTIFY=<text>: send a notification a few seconds later.
     if [ -n "${CALI_DEBUG_NOTIFY:-}" ]; then
       sleep 4

@@ -46,7 +46,7 @@ pub struct CaliMenuStyle {
 }
 
 pub const STYLE: CaliMenuStyle = CaliMenuStyle {
-    width: 260.0,
+    width: 340.0,
     padding: 10.0,
     row_height: 40.0,
     corner_radius: 18.0,

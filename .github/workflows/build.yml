@@ -74,6 +74,11 @@ jobs:
       - name: Start Sookie headless
         run: make smoke-sookie
 
+      - name: Build Cali Settings
+        run: |
+          dnf install -y --setopt=install_weak_deps=False gtk4-devel libadwaita-devel
+          make settings-app
+
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:

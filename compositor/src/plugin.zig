@@ -11,6 +11,9 @@ const ui = @import("ui.zig");
 const calendar = @import("calendar.zig");
 const switcher = @import("switcher.zig");
 const notifications = @import("notifications.zig");
+const settings = @import("settings.zig");
+const status = @import("status.zig");
+const osd = @import("osd.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -59,7 +62,6 @@ var panel: ?*c.ClutterActor = null;
 var clock: ?*c.ClutterActor = null;
 var panel_rect = c.MtkRectangle{ .x = 0, .y = 0, .width = 0, .height = 0 };
 
-const map_handler_key = "cali-map-handler";
 
 // ---- GObject type -------------------------------------------------------------
 
@@ -86,6 +88,9 @@ fn classInit(klass: c.gpointer, _: c.gpointer) callconv(.C) void {
     k.start = &start;
     k.map = &map;
     k.kill_window_effects = &killWindowEffects;
+    k.destroy = &destroy;
+    k.minimize = &minimize;
+    k.unminimize = &unminimize;
     k.switch_workspace = &workspaces.switchWorkspace;
     k.kill_switch_workspace = &workspaces.killSwitchWorkspace;
 }
@@ -112,6 +117,14 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     calendar.init(stage, clock);
     switcher.init(d, stage);
     notifications.init(stage);
+    osd.init(stage);
+    status.init(d);
+    settings.init();
+
+    if (std.posix.getenv("CALI_DEBUG_MINIMIZE")) |value| {
+        const seconds = std.fmt.parseInt(c_uint, value, 10) catch 3;
+        _ = c.g_timeout_add_seconds(seconds, &debugMinimize, null);
+    }
 
     connect(monitor_manager, "monitors-changed", &onMonitorsChanged, null);
     connect(c.meta_display_get_workspace_manager(d), "workspace-added", &onWorkspaceAdded, null);
@@ -215,6 +228,11 @@ fn onWorkspaceAdded(_: ?*c.MetaWorkspaceManager, _: c_int, _: c.gpointer) callco
     applyStruts();
 }
 
+/// Redraws the clock now (after its settings change).
+pub fn refreshClock() void {
+    _ = tickClock(null);
+}
+
 fn tickClock(_: c.gpointer) callconv(.C) c.gboolean {
     const text = clock orelse return 0;
     var buf: [64]u8 = undefined;
@@ -238,13 +256,58 @@ pub fn isAppWindow(window: ?*c.MetaWindow) bool {
         sameEnum(kind, c.META_WINDOW_MODAL_DIALOG);
 }
 
+// Every window effect follows the same pattern: animate, then tell Sookie
+// it's done (it waits for that). The kind of effect and its signal handler
+// are kept on the actor so an interrupted effect can be finished properly.
+
+const Effect = enum(usize) { map = 1, destroy, minimize, unminimize };
+const effect_key = "cali-effect";
+const handler_key = "cali-effect-handler";
+
+const destroy_ms = 150;
+const minimize_ms = 220;
+
+fn startEffect(plugin: ?*c.MetaPlugin, actor: *c.ClutterActor, effect: Effect) void {
+    const object: *c.GObject = @ptrCast(@alignCast(actor));
+    const id = c.g_signal_connect_data(actor, "transitions-completed", @ptrCast(&onEffectDone), plugin, null, 0);
+    c.g_object_set_data(object, effect_key, @ptrFromInt(@intFromEnum(effect)));
+    c.g_object_set_data(object, handler_key, @ptrFromInt(id));
+}
+
+fn onEffectDone(actor: ?*c.ClutterActor, plugin: c.gpointer) callconv(.C) void {
+    finishEffect(actor, @ptrCast(@alignCast(plugin)));
+}
+
+/// Ends the running effect on `actor` (if any) and tells Sookie.
+fn finishEffect(actor: ?*c.ClutterActor, plugin: ?*c.MetaPlugin) void {
+    const object: *c.GObject = @ptrCast(@alignCast(actor));
+    const kind = c.g_object_get_data(object, effect_key) orelse return;
+    if (c.g_object_get_data(object, handler_key)) |id| c.g_signal_handler_disconnect(object, @intFromPtr(id));
+    c.g_object_set_data(object, effect_key, null);
+    c.g_object_set_data(object, handler_key, null);
+
+    // Back to normal before Sookie hides, shows or destroys the window.
+    c.clutter_actor_set_opacity(actor, 255);
+    c.clutter_actor_set_scale(actor, 1.0, 1.0);
+    c.clutter_actor_set_translation(actor, 0, 0, 0);
+
+    const window_actor: ?*c.MetaWindowActor = @ptrCast(@alignCast(actor));
+    switch (@as(Effect, @enumFromInt(@intFromPtr(kind)))) {
+        .map => c.meta_plugin_map_completed(plugin, window_actor),
+        .destroy => c.meta_plugin_destroy_completed(plugin, window_actor),
+        .minimize => c.meta_plugin_minimize_completed(plugin, window_actor),
+        .unminimize => c.meta_plugin_unminimize_completed(plugin, window_actor),
+    }
+    std.log.debug("effect done: {s}", .{@tagName(@as(Effect, @enumFromInt(@intFromPtr(kind))))});
+}
+
+fn appWindow(window_actor: ?*c.MetaWindowActor) bool {
+    return isAppWindow(c.meta_window_actor_get_meta_window(window_actor));
+}
+
 /// New windows fade in while growing slightly, like GNOME.
 fn map(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
-    if (!isAppWindow(c.meta_window_actor_get_meta_window(window_actor))) {
-        c.meta_plugin_map_completed(plugin, window_actor);
-        return;
-    }
-
+    if (!appWindow(window_actor)) return c.meta_plugin_map_completed(plugin, window_actor);
     overview.windowMapped();
 
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
@@ -253,36 +316,105 @@ fn map(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) v
     c.clutter_actor_set_scale(actor, map_start_scale, map_start_scale);
     c.clutter_actor_show(actor);
 
-    c.clutter_actor_save_easing_state(actor);
-    c.clutter_actor_set_easing_mode(actor, @intCast(c.CLUTTER_EASE_OUT_QUAD));
-    c.clutter_actor_set_easing_duration(actor, map_duration_ms);
+    ui.ease(actor, map_duration_ms, c.CLUTTER_EASE_OUT_QUAD);
     c.clutter_actor_set_opacity(actor, 255);
     c.clutter_actor_set_scale(actor, 1.0, 1.0);
     c.clutter_actor_restore_easing_state(actor);
-
-    const id = c.g_signal_connect_data(actor, "transitions-completed", @ptrCast(&onMapDone), plugin, null, 0);
-    c.g_object_set_data(@ptrCast(@alignCast(actor)), map_handler_key, @ptrFromInt(id));
+    startEffect(plugin, actor, .map);
 }
 
-fn onMapDone(actor: ?*c.ClutterActor, plugin: c.gpointer) callconv(.C) void {
-    finishMap(actor, @ptrCast(@alignCast(plugin)));
+/// Closing windows fade out while shrinking a little.
+fn destroy(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
+    if (!appWindow(window_actor)) return c.meta_plugin_destroy_completed(plugin, window_actor);
+    const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
+    c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
+    ui.ease(actor, destroy_ms, c.CLUTTER_EASE_OUT_QUAD);
+    c.clutter_actor_set_opacity(actor, 0);
+    c.clutter_actor_set_scale(actor, 0.9, 0.9);
+    c.clutter_actor_restore_easing_state(actor);
+    startEffect(plugin, actor, .destroy);
 }
 
-fn finishMap(actor: ?*c.ClutterActor, plugin: ?*c.MetaPlugin) void {
-    const object: *c.GObject = @ptrCast(@alignCast(actor));
-    const id = c.g_object_get_data(object, map_handler_key) orelse return;
-    c.g_signal_handler_disconnect(object, @intFromPtr(id));
-    c.g_object_set_data(object, map_handler_key, null);
-    c.meta_plugin_map_completed(plugin, @ptrCast(@alignCast(actor)));
+/// Where minimized windows go: the bottom middle of the primary monitor,
+/// where the dock appears.
+fn minimizeOffset(actor: *c.ClutterActor) [2]f32 {
+    const d = display orelse return .{ 0, 0 };
+    if (c.meta_display_get_n_monitors(d) == 0) return .{ 0, 0 };
+    var mon: c.MtkRectangle = undefined;
+    c.meta_display_get_monitor_geometry(d, c.meta_display_get_primary_monitor(d), &mon);
+    var x: f32 = 0;
+    var y: f32 = 0;
+    var w: f32 = 0;
+    var h: f32 = 0;
+    c.clutter_actor_get_position(actor, &x, &y);
+    c.clutter_actor_get_size(actor, &w, &h);
+    const tx = @as(f32, @floatFromInt(mon.x)) + @as(f32, @floatFromInt(mon.width)) / 2 - (x + w / 2);
+    const ty = @as(f32, @floatFromInt(mon.y + mon.height)) - (y + h / 2);
+    return .{ tx, ty };
+}
+
+/// Minimizing shrinks the window down toward the dock.
+fn minimize(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
+    if (!appWindow(window_actor)) return c.meta_plugin_minimize_completed(plugin, window_actor);
+    const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
+    const offset = minimizeOffset(actor);
+    c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
+    ui.ease(actor, minimize_ms, c.CLUTTER_EASE_IN_QUAD);
+    c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
+    c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    c.clutter_actor_set_opacity(actor, 0);
+    c.clutter_actor_restore_easing_state(actor);
+    startEffect(plugin, actor, .minimize);
+}
+
+/// Restoring grows the window back out of the dock.
+fn unminimize(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
+    if (!appWindow(window_actor)) return c.meta_plugin_unminimize_completed(plugin, window_actor);
+    const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
+    const offset = minimizeOffset(actor);
+    c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
+    c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
+    c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    c.clutter_actor_set_opacity(actor, 0);
+    c.clutter_actor_show(actor);
+    ui.ease(actor, minimize_ms, c.CLUTTER_EASE_OUT_QUAD);
+    c.clutter_actor_set_translation(actor, 0, 0, 0);
+    c.clutter_actor_set_scale(actor, 1.0, 1.0);
+    c.clutter_actor_set_opacity(actor, 255);
+    c.clutter_actor_restore_easing_state(actor);
+    startEffect(plugin, actor, .unminimize);
 }
 
 /// Sookie asks to stop effects early (window closed, moved, ...).
 fn killWindowEffects(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
-    if (c.g_object_get_data(@ptrCast(@alignCast(actor)), map_handler_key) == null) return;
-
+    if (c.g_object_get_data(@ptrCast(@alignCast(actor)), effect_key) == null) return;
     c.clutter_actor_remove_all_transitions(actor);
-    c.clutter_actor_set_opacity(actor, 255);
-    c.clutter_actor_set_scale(actor, 1.0, 1.0);
-    finishMap(actor, plugin);
+    finishEffect(actor, plugin);
+}
+
+// ---- Debug -----------------------------------------------------------------------
+
+/// CALI_DEBUG_MINIMIZE=<seconds>: minimize the focused window, restore it two
+/// seconds later, then close it two seconds after that.
+fn debugMinimize(_: c.gpointer) callconv(.C) c.gboolean {
+    const d = display orelse return 0;
+    debug_window = c.meta_display_get_focus_window(d);
+    if (debug_window) |w| c.meta_window_minimize(w);
+    _ = c.g_timeout_add_seconds(2, &debugUnminimize, null);
+    return 0;
+}
+
+var debug_window: ?*c.MetaWindow = null;
+
+fn debugUnminimize(_: c.gpointer) callconv(.C) c.gboolean {
+    if (debug_window) |w| c.meta_window_unminimize(w);
+    _ = c.g_timeout_add_seconds(2, &debugClose, null);
+    return 0;
+}
+
+fn debugClose(_: c.gpointer) callconv(.C) c.gboolean {
+    const d = display orelse return 0;
+    if (debug_window) |w| c.meta_window_delete(w, c.meta_display_get_current_time_roundtrip(d));
+    return 0;
 }

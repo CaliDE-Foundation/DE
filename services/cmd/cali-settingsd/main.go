@@ -1,26 +1,141 @@
-// cali-settingsd owns Cali's configuration and will serve it on D-Bus
-// as org.calide.Settings.
+// cali-settingsd owns Cali's settings (~/.config/cali/cali.toml) and serves
+// them on the session bus (name org.calide.SettingsDaemon, interface
+// org.calide.Settings). The shell and Cali
+// Settings read and change them through it and get Changed signals.
 package main
 
 import (
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
+	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/introspect"
+
 	"github.com/CaliDE-Foundation/DE/services/internal/config"
+	"github.com/CaliDE-Foundation/DE/services/internal/settings"
 )
 
+const (
+	busName = "org.calide.SettingsDaemon" // org.calide.Settings is the app's ID
+	path    = dbus.ObjectPath("/org/calide/Settings")
+	iface   = "org.calide.Settings"
+)
+
+const introspection = `<node>
+  <interface name="org.calide.Settings">
+    <method name="GetAll"><arg direction="out" type="a{sv}"/></method>
+    <method name="Get"><arg direction="in" type="s" name="key"/><arg direction="out" type="v"/></method>
+    <method name="Set"><arg direction="in" type="s" name="key"/><arg direction="in" type="v" name="value"/></method>
+    <method name="Reset"><arg direction="in" type="s" name="key"/></method>
+    <signal name="Changed"><arg type="s" name="key"/><arg type="v" name="value"/></signal>
+  </interface>` + introspect.IntrospectDataString + `</node>`
+
+type server struct {
+	conn  *dbus.Conn
+	store *settings.Store
+}
+
+func dbusErr(err error) *dbus.Error {
+	return dbus.NewError("org.calide.Settings.Error.Invalid", []any{err.Error()})
+}
+
+func (s *server) GetAll() (map[string]dbus.Variant, *dbus.Error) {
+	out := map[string]dbus.Variant{}
+	for k, v := range s.store.All() {
+		out[k] = dbus.MakeVariant(v)
+	}
+	return out, nil
+}
+
+func (s *server) Get(key string) (dbus.Variant, *dbus.Error) {
+	v, ok := s.store.Get(key)
+	if !ok {
+		return dbus.Variant{}, dbus.NewError("org.calide.Settings.Error.UnknownKey", []any{key})
+	}
+	return dbus.MakeVariant(v), nil
+}
+
+func (s *server) Set(key string, value dbus.Variant) *dbus.Error {
+	changed, err := s.store.Set(key, value.Value())
+	if err != nil {
+		return dbusErr(err)
+	}
+	if changed {
+		s.changed(key)
+	}
+	return nil
+}
+
+func (s *server) Reset(key string) *dbus.Error {
+	if err := s.store.Reset(key); err != nil {
+		return dbusErr(err)
+	}
+	s.changed(key)
+	return nil
+}
+
+func (s *server) changed(key string) {
+	v, _ := s.store.Get(key)
+	if key == "dark-style" {
+		applyDarkStyle(v == true)
+	}
+	if err := s.conn.Emit(path, iface+".Changed", key, dbus.MakeVariant(v)); err != nil {
+		log.Printf("cali-settingsd: emitting Changed: %v", err)
+	}
+}
+
+// applyDarkStyle sets GNOME's color-scheme, which GTK and libadwaita apps follow.
+func applyDarkStyle(dark bool) {
+	scheme := "default"
+	if dark {
+		scheme = "prefer-dark"
+	}
+	cmd := exec.Command("gsettings", "set", "org.gnome.desktop.interface", "color-scheme", scheme)
+	if err := cmd.Run(); err != nil {
+		log.Printf("cali-settingsd: setting color-scheme: %v", err)
+	}
+}
+
 func main() {
-	p, err := config.File()
+	file, err := config.File()
 	if err != nil {
 		log.Fatalf("cali-settingsd: %v", err)
 	}
-	log.Printf("cali-settingsd %s: config at %s", config.Version, p)
+	store, err := settings.Open(file)
+	if err != nil {
+		log.Fatalf("cali-settingsd: reading %s: %v", file, err)
+	}
 
-	// TODO: expose org.calide.Settings on the session bus.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	log.Print("cali-settingsd: shutting down")
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		log.Fatalf("cali-settingsd: session bus: %v", err)
+	}
+	defer conn.Close()
+
+	s := &server{conn: conn, store: store}
+	if err := conn.Export(s, path, iface); err != nil {
+		log.Fatalf("cali-settingsd: export: %v", err)
+	}
+	if err := conn.Export(introspect.Introspectable(introspection), path, "org.freedesktop.DBus.Introspectable"); err != nil {
+		log.Fatalf("cali-settingsd: export introspection: %v", err)
+	}
+	reply, err := conn.RequestName(busName, dbus.NameFlagDoNotQueue)
+	if err != nil || reply != dbus.RequestNameReplyPrimaryOwner {
+		log.Fatalf("cali-settingsd: %s is already taken (%v)", busName, err)
+	}
+
+	if v, _ := store.Get("dark-style"); v != nil {
+		applyDarkStyle(v == true)
+	}
+	log.Printf("cali-settingsd %s: settings in %s", config.Version, file)
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-stop:
+	case <-conn.Context().Done():
+	}
 }

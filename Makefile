@@ -12,13 +12,19 @@ SOOKIE_PC    := $(SOOKIE_ROOT)/usr/lib64/pkgconfig
 PODMAN       ?= podman
 DEV_IMAGE    ?= localhost/calide-dev:fedora45
 
-.PHONY: all shell compositor compositor-sookie services sookie sookie-fetch \
+.PHONY: all shell settings-app compositor compositor-sookie services sookie sookie-fetch \
         test run smoke-sookie container-image container devkit clean
 
 all: compositor services
 
 shell:
 	$(NICE) cargo build --release -j $(JOBS)
+
+# Cali Settings (GTK 4 + libadwaita); needs their development files.
+settings-app:
+	mkdir -p $(OUT)
+	$(NICE) cargo build --release -j $(JOBS) -p cali-settings
+	cp $${CARGO_TARGET_DIR:-target}/release/cali-settings $(OUT)/
 
 compositor: shell
 	cd compositor && $(NICE) zig build -j$(JOBS) --prefix ../out
@@ -88,11 +94,12 @@ devkit: container-image
 	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
-	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES -e CALI_DEBUG_APPS -e CALI_DEBUG_SEARCH -e CALI_DEBUG_CALENDAR -e CALI_DEBUG_SWITCHER -e CALI_DEBUG_NOTIFY \
+	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES -e CALI_DEBUG_APPS -e CALI_DEBUG_SEARCH -e CALI_DEBUG_CALENDAR -e CALI_DEBUG_SWITCHER -e CALI_DEBUG_NOTIFY -e CALI_DEBUG_OSD -e CALI_DEBUG_MINIMIZE -e CALI_DEBUG_CALICTL \
 	  $(DEV_IMAGE) bash -c '\
 	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) compositor-sookie-container; \
-	    make JOBS=$(JOBS) OUT=out/container/bin services; \
+	    make JOBS=$(JOBS) OUT=out/container/bin services settings-app; \
+	    scripts/install-settings-app.sh; \
 	    trap "trap - TERM INT; kill -TERM 0" TERM INT; \
 	    scripts/devkit.sh out/container/bin/cali-compositor & wait $$!'
 

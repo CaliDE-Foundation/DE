@@ -21,4 +21,6 @@ make            # Zig, Rust and Go
 make devkit     # run Cali in a window (podman)
 ```
 
+Change settings with **Cali Settings** or `calictl set accent-color teal`; they apply right away.
+
 Built on [Sookie](https://github.com/CaliDE-Foundation/Sookie). GPL-3.0-or-later.

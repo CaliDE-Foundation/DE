@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["shell"]
+members = ["shell", "settings-app"]
+# Cali Settings needs GTK 4 and libadwaita headers; build it explicitly
+# (`make settings-app`) so the rest builds anywhere.
+default-members = ["shell"]
 
 [workspace.package]
 version = "0.1.0"

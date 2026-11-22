@@ -1,7 +1,7 @@
 //! The dock at the bottom of the overview: which apps it shows and its look.
 
 use std::ffi::CString;
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 /// Look of the dock.
 #[repr(C)]
@@ -53,16 +53,28 @@ pub fn parse_favorites(list: &str) -> Vec<String> {
     out
 }
 
-/// Favorites from `$CALI_DOCK_FAVORITES`, or the defaults.
-pub fn favorites() -> &'static [CString] {
-    static FAVORITES: OnceLock<Vec<CString>> = OnceLock::new();
-    FAVORITES.get_or_init(|| {
-        let ids = match std::env::var("CALI_DOCK_FAVORITES") {
+static FAVORITES: Mutex<Option<Vec<CString>>> = Mutex::new(None);
+
+fn to_c(ids: Vec<String>) -> Vec<CString> {
+    ids.into_iter().filter_map(|id| CString::new(id).ok()).collect()
+}
+
+/// Replaces the favorites (from the dock-favorites setting).
+pub fn set_favorites(list: &str) {
+    *FAVORITES.lock().unwrap() = Some(to_c(parse_favorites(list)));
+}
+
+/// The `i`th favorite: from the setting, else `$CALI_DOCK_FAVORITES`, else
+/// the defaults. The pointer stays valid until the favorites change.
+pub fn favorite(i: usize) -> Option<*const std::ffi::c_char> {
+    let mut guard = FAVORITES.lock().unwrap();
+    let list = guard.get_or_insert_with(|| {
+        to_c(match std::env::var("CALI_DOCK_FAVORITES") {
             Ok(list) if !list.trim().is_empty() => parse_favorites(&list),
             _ => DEFAULT_FAVORITES.iter().map(|s| s.to_string()).collect(),
-        };
-        ids.into_iter().filter_map(|id| CString::new(id).ok()).collect()
-    })
+        })
+    });
+    list.get(i).map(|id| id.as_ptr())
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ mod calendar;
 mod dock;
 mod draw;
 mod search;
+mod status;
 mod icons;
 mod menu;
 mod overview;
@@ -17,6 +18,66 @@ mod workspaces;
 
 pub use calendar::CaliDay;
 pub use dock::CaliDockStyle;
+pub use status::CaliStatus;
+
+/// The `i`th top bar status icon for `status`, left to right; NULL past the end.
+///
+/// # Safety
+/// `status` must be NULL or point to a valid `CaliStatus`.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_status_icons(status: *const CaliStatus, i: usize) -> *const c_char {
+    let s = if status.is_null() { CaliStatus::default() } else { unsafe { *status } };
+    status::icons(&s).get(i).map_or(std::ptr::null(), |n| n.as_ptr())
+}
+
+/// Volume icon for a level (0-1) and mute state.
+#[no_mangle]
+pub extern "C" fn cali_shell_volume_icon(volume: f32, muted: bool) -> *const c_char {
+    status::volume_icon(volume, muted).as_ptr()
+}
+
+/// An accent color name (coral, blue, ...) as 0xRRGGBBAA; coral if unknown.
+///
+/// # Safety
+/// `name` must be NULL or a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_accent_rgba(name: *const c_char) -> u32 {
+    let name = if name.is_null() { "" } else { unsafe { CStr::from_ptr(name) }.to_str().unwrap_or("") };
+    accent(name)
+}
+
+/// Accent colors: GNOME's palette, plus Cali's coral (the default).
+pub fn accent(name: &str) -> u32 {
+    match name {
+        "blue" => 0x3584e4ff,
+        "teal" => 0x2190a4ff,
+        "green" => 0x3a944aff,
+        "yellow" => 0xc88800ff,
+        "orange" => 0xed5b00ff,
+        "red" => 0xe62d42ff,
+        "pink" => 0xd56199ff,
+        "purple" => 0x9141acff,
+        "slate" => 0x6f8396ff,
+        _ => 0xe2725bff, // coral
+    }
+}
+
+/// Sets what the top bar clock shows.
+#[no_mangle]
+pub extern "C" fn cali_shell_set_clock_options(weekday: bool, seconds: bool) {
+    panel::set_clock_options(weekday, seconds);
+}
+
+/// Replaces the dock favorites with a comma-separated list of desktop IDs.
+///
+/// # Safety
+/// `list` must be NULL or a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_set_dock_favorites(list: *const c_char) {
+    if !list.is_null() {
+        dock::set_favorites(&unsafe { CStr::from_ptr(list) }.to_string_lossy());
+    }
+}
 
 /// Today's date as year, month (1-12) and day.
 ///
@@ -166,7 +227,7 @@ pub extern "C" fn cali_shell_dock_style() -> CaliDockStyle {
 /// The `i`th favorite app's desktop file ID, or NULL past the end.
 #[no_mangle]
 pub extern "C" fn cali_shell_dock_favorite(i: usize) -> *const c_char {
-    dock::favorites().get(i).map_or(std::ptr::null(), |id| id.as_ptr())
+    dock::favorite(i).unwrap_or(std::ptr::null())
 }
 
 /// Look of the system menu.
@@ -374,6 +435,12 @@ mod tests {
         assert!(unsafe { cali_shell_start(s) });
         unsafe { cali_shell_free(s) };
         assert!(!unsafe { cali_shell_start(std::ptr::null_mut()) });
+    }
+
+    #[test]
+    fn accents() {
+        assert_eq!(accent("blue"), 0x3584e4ff);
+        assert_eq!(accent("nonsense"), accent("coral"));
     }
 
     #[test]
