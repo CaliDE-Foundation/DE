@@ -126,3 +126,103 @@ pub fn launchId(display: ?*c.MetaDisplay, id: [*:0]const u8) bool {
     launch(display, @ptrCast(@alignCast(info)));
     return true;
 }
+
+// ---- Popups ---------------------------------------------------------------------------
+// One popup at a time (system menu, calendar, ...). It takes all input until
+// closed; a click outside it or Escape closes it.
+
+const plugin = @import("plugin.zig");
+
+var popup_catcher: ?*c.ClutterActor = null;
+var popup_content: ?*c.ClutterActor = null;
+var popup_grab: ?*c.ClutterGrab = null;
+var popup_on_close: ?*const fn () void = null;
+
+pub fn popupIsOpen() bool {
+    return popup_catcher != null;
+}
+
+/// Shows `content` (already positioned in stage coordinates) as the popup,
+/// closing any other popup first. `on_close` runs when it closes.
+pub fn openPopup(content: *c.ClutterActor, on_close: ?*const fn () void) void {
+    closePopup();
+    const s = stage orelse return;
+    var w: f32 = 0;
+    var h: f32 = 0;
+    c.clutter_actor_get_size(s, &w, &h);
+
+    const catcher = c.clutter_actor_new();
+    c.clutter_actor_set_size(catcher, w, h);
+    c.clutter_actor_set_reactive(catcher, 1);
+    c.clutter_actor_add_child(s, catcher);
+    plugin.connect(catcher, "button-release-event", &onPopupOutside, null);
+    plugin.connect(catcher, "key-press-event", &onPopupKey, null);
+    popup_grab = c.clutter_stage_grab(@ptrCast(@alignCast(s)), catcher);
+    c.clutter_stage_set_key_focus(@ptrCast(@alignCast(s)), catcher);
+    popup_catcher = catcher;
+    popup_on_close = on_close;
+
+    setPopupContent(content);
+
+    // Grow in from the top.
+    c.clutter_actor_set_pivot_point(content, 0.5, 0.0);
+    c.clutter_actor_set_opacity(content, 0);
+    c.clutter_actor_set_scale(content, 0.95, 0.95);
+    ease(content, 150, c.CLUTTER_EASE_OUT_QUAD);
+    c.clutter_actor_set_opacity(content, 255);
+    c.clutter_actor_set_scale(content, 1.0, 1.0);
+    c.clutter_actor_restore_easing_state(content);
+}
+
+/// Swaps what the open popup shows (e.g. the next month, a confirmation).
+pub fn setPopupContent(content: *c.ClutterActor) void {
+    const catcher = popup_catcher orelse return;
+    if (popup_content) |old| c.clutter_actor_destroy(old);
+    c.clutter_actor_set_reactive(content, 1); // clicks inside don't close it
+    plugin.connect(content, "button-release-event", &swallowClick, null);
+    c.clutter_actor_add_child(catcher, content);
+    popup_content = content;
+}
+
+pub fn closePopup() void {
+    if (popup_grab) |g| {
+        c.clutter_grab_dismiss(g);
+        c.g_object_unref(g);
+        popup_grab = null;
+    }
+    const catcher = popup_catcher orelse return;
+    popup_catcher = null;
+    popup_content = null;
+    c.clutter_actor_destroy(catcher);
+    const on_close = popup_on_close;
+    popup_on_close = null;
+    if (on_close) |f| f();
+}
+
+fn swallowClick(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    return 1;
+}
+
+fn onPopupOutside(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    closePopup();
+    return 1;
+}
+
+fn onPopupKey(_: ?*c.ClutterActor, event: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    if (c.clutter_event_get_key_symbol(event) == c.CLUTTER_KEY_Escape) {
+        closePopup();
+        return 1;
+    }
+    return 0;
+}
+
+/// A rounded button showing a white symbolic icon; `handler` gets `data`.
+pub fn iconButton(name: [*:0]const u8, size: f32, handler: anytype, data: c.gpointer) *c.ClutterActor {
+    const button = roundedRect(size, size, size / 2, 0xffffff14);
+    const glyph = icon(name, 16, true, 0xffffff);
+    center(glyph, button, c.CLUTTER_ALIGN_BOTH);
+    c.clutter_actor_add_child(button, glyph);
+    c.clutter_actor_set_reactive(button, 1);
+    plugin.connect(button, "button-release-event", handler, data);
+    return button;
+}

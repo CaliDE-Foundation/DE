@@ -39,6 +39,16 @@ exec dbus-run-session -- bash -c '
       WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland $app >>/tmp/app.log 2>&1 &
       sleep 0.7
     done
+    # CALI_DEBUG_NOTIFY=<text>: send a notification a few seconds later.
+    if [ -n "${CALI_DEBUG_NOTIFY:-}" ]; then
+      sleep 4
+      echo "devkit: sending a notification"
+      gdbus call --session --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify \
+        "Text Editor" 0 "org.gnome.TextEditor" "$CALI_DEBUG_NOTIFY" \
+        "Saved to Documents/notes.txt" "[]" "{}" 20000 >/dev/null || true
+    fi
     wait
   ) &
 

@@ -5,6 +5,7 @@
 const std = @import("std");
 const plugin = @import("plugin.zig");
 const dock = @import("dock.zig");
+const appgrid = @import("appgrid.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
 
@@ -42,6 +43,17 @@ var entries: [max_windows]Entry = undefined;
 var n_entries: usize = 0;
 var layout_area = c.CaliRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
 
+/// What the overview shows: window cards, every app, or search results.
+const Mode = enum { windows, apps, search };
+var mode: Mode = .windows;
+var query_buf: [256]u8 = undefined;
+var query_len: usize = 0;
+var search_label: ?*c.ClutterActor = null;
+const search_h: f32 = 38;
+const search_w: f32 = 340;
+const search_gap: f32 = 18;
+const placeholder = "Type to search";
+
 const black = c.CoglColor{ .red = 0, .green = 0, .blue = 0, .alpha = 255 };
 
 pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
@@ -61,7 +73,7 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     plugin.connect(corner, "enter-event", &onHotCorner, null);
     plugin.connect(corner, "leave-event", &onHotCornerLeft, null);
     hot_corner = corner;
-    _ = c.g_timeout_add_seconds(2, &armHotCornerIfFree, null);
+    _ = c.g_timeout_add_seconds(1, &armHotCornerIfFree, null);
 
     // CALI_DEBUG_OVERVIEW=<seconds> opens the overview once, for testing.
     if (std.posix.getenv("CALI_DEBUG_OVERVIEW")) |value| {
@@ -79,11 +91,27 @@ pub fn toggle() void {
 }
 
 fn onOverlayKey(_: ?*c.MetaDisplay, _: c.gpointer) callconv(.C) void {
+    std.log.debug("overview: overlay key", .{});
     toggle();
 }
 
+/// Whether the real pointer is in the hot corner. Clutter can send enter
+/// events when things change under a pointer that hasn't moved, so ask
+/// Sookie's cursor tracker where it actually is.
+fn pointerInCorner() bool {
+    const d = display orelse return false;
+    const corner = hot_corner orelse return false;
+    const backend = c.meta_context_get_backend(c.meta_display_get_context(d));
+    var pos = c.graphene_point_t{ .x = -1, .y = -1 };
+    c.meta_cursor_tracker_get_pointer(c.meta_backend_get_cursor_tracker(backend), &pos, null);
+    var x: f32 = 0;
+    var y: f32 = 0;
+    c.clutter_actor_get_transformed_position(corner, &x, &y);
+    return pos.x <= x + 1 and pos.y <= y + 1;
+}
+
 fn onHotCorner(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    if (hot_corner_armed) {
+    if (hot_corner_armed and pointerInCorner()) {
         hot_corner_armed = false;
         toggle();
     }
@@ -91,15 +119,18 @@ fn onHotCorner(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv
 }
 
 fn onHotCornerLeft(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    hot_corner_armed = true;
+    // Clutter also sends leave/enter pairs when windows open under a pointer
+    // that hasn't moved; only a real move out of the corner re-arms it.
+    if (!pointerInCorner()) hot_corner_armed = true;
     return 0;
 }
 
+/// Arms the hot corner once the pointer is somewhere else (checked every
+/// second until then).
 fn armHotCornerIfFree(_: c.gpointer) callconv(.C) c.gboolean {
-    if (hot_corner) |corner| {
-        if (c.clutter_actor_has_pointer(corner) == 0) hot_corner_armed = true;
-    }
-    return 0; // run once
+    if (pointerInCorner()) return 1; // keep checking
+    hot_corner_armed = true;
+    return 0;
 }
 
 /// A window opened while the overview is up: go back to the desktop so it's visible.
@@ -109,6 +140,13 @@ pub fn windowMapped() void {
 
 fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {
     if (state == .closed) open();
+    // CALI_DEBUG_APPS=1 shows the app grid; CALI_DEBUG_SEARCH=<text> searches.
+    if (std.posix.getenv("CALI_DEBUG_APPS") != null) setMode(.apps);
+    if (std.posix.getenv("CALI_DEBUG_SEARCH")) |text| {
+        query_len = @min(text.len, query_buf.len - 1);
+        @memcpy(query_buf[0..query_len], text[0..query_len]);
+        updateQuery();
+    }
     // CALI_DEBUG_OVERVIEW_PICK=<seconds> then picks the last window, like a click.
     if (std.posix.getenv("CALI_DEBUG_OVERVIEW_PICK")) |value| {
         const seconds = std.fmt.parseInt(c_uint, value, 10) catch 3;
@@ -167,11 +205,29 @@ fn open() void {
     const dock_height = dock.create(d, g, stage_w, stage_h);
     const work_top = @as(f32, @floatFromInt(work.y));
     const work_bottom = @min(@as(f32, @floatFromInt(work.y + work.height)), stage_h - dock_height);
+    // Search field at the top.
+    const field = ui.roundedRect(search_w, search_h, search_h / 2, 0xffffff1f);
+    c.clutter_actor_set_position(field, (stage_w - search_w) / 2, work_top + search_gap);
+    const glass = ui.icon("edit-find-symbolic", 16, true, 0xffffff);
+    c.clutter_actor_set_position(glass, 14, (search_h - 16) / 2);
+    c.clutter_actor_add_child(field, glass);
+    const text = ui.label(placeholder, "Adwaita Sans 11");
+    c.clutter_actor_set_x(text, 40);
+    c.clutter_actor_set_width(text, search_w - 56);
+    ui.center(text, field, c.CLUTTER_ALIGN_Y_AXIS);
+    c.clutter_actor_set_opacity(text, 150);
+    c.clutter_actor_add_child(field, text);
+    c.clutter_actor_add_child(g, field);
+    search_label = text;
+    query_len = 0;
+    mode = .windows;
+
+    const top = work_top + search_gap + search_h;
     layout_area = .{
         .x = @as(f32, @floatFromInt(work.x)) + margin,
-        .y = work_top + margin,
+        .y = top + margin,
         .width = @as(f32, @floatFromInt(work.width)) - 2 * margin,
-        .height = work_bottom - work_top - 2 * margin - title_space,
+        .height = work_bottom - top - 2 * margin - title_space,
     };
 
     // One card per window on this workspace, in stacking order.
@@ -340,11 +396,79 @@ fn onEmptyClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callc
 
 fn onKey(_: ?*c.ClutterActor, event: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
     switch (c.clutter_event_get_key_symbol(event)) {
-        c.CLUTTER_KEY_Escape, c.CLUTTER_KEY_Super_L, c.CLUTTER_KEY_Super_R => {
-            close(null);
-            return 1;
+        c.CLUTTER_KEY_Super_L, c.CLUTTER_KEY_Super_R => close(null),
+        c.CLUTTER_KEY_Escape => {
+            // Step back: search/apps -> windows -> desktop.
+            if (mode != .windows) {
+                query_len = 0;
+                updateQuery();
+                setMode(.windows);
+            } else close(null);
         },
-        else => return 0,
+        c.CLUTTER_KEY_BackSpace => {
+            if (query_len > 0) {
+                // Drop the last character (skip UTF-8 continuation bytes).
+                query_len -= 1;
+                while (query_len > 0 and query_buf[query_len] & 0xc0 == 0x80) query_len -= 1;
+                updateQuery();
+            }
+        },
+        c.CLUTTER_KEY_Return, c.CLUTTER_KEY_KP_Enter => {
+            if (mode == .search and appgrid.activateFirst()) close(null);
+        },
+        else => {
+            const ch = c.clutter_event_get_key_unicode(event);
+            const ctrl = c.clutter_event_get_state(event) & (c.CLUTTER_CONTROL_MASK | c.CLUTTER_MOD1_MASK) != 0;
+            if (ch < 0x20 or ch == 0x7f or ctrl) return 0;
+            var utf8: [4]u8 = undefined;
+            const n = std.unicode.utf8Encode(@intCast(ch), &utf8) catch return 0;
+            if (query_len + n >= query_buf.len) return 1;
+            @memcpy(query_buf[query_len..][0..n], utf8[0..n]);
+            query_len += n;
+            updateQuery();
+        },
+    }
+    return 1;
+}
+
+/// Shows the query (or the placeholder) and switches to search results.
+fn updateQuery() void {
+    query_buf[query_len] = 0;
+    if (search_label) |l| {
+        const text: [*:0]const u8 = if (query_len == 0) placeholder else @ptrCast(&query_buf);
+        c.clutter_text_set_text(@ptrCast(@alignCast(l)), text);
+        c.clutter_actor_set_opacity(l, if (query_len == 0) 150 else 255);
+    }
+    if (query_len > 0) setMode(.search) else if (mode == .search) setMode(.windows);
+}
+
+fn setMode(m: Mode) void {
+    const g = group orelse return;
+    mode = m;
+    const show_windows = m == .windows;
+    for (entries[0..n_entries]) |entry| {
+        c.clutter_actor_set_reactive(entry.item, @intFromBool(show_windows));
+        fade(entry.item, if (show_windows) 255 else 0);
+    }
+    if (show_windows) {
+        appgrid.hide();
+    } else {
+        var area = layout_area;
+        area.height += title_space;
+        appgrid.show(display, g, area, if (m == .search) @as([*:0]const u8, @ptrCast(&query_buf)) else null);
+    }
+}
+
+/// The dock's Show Apps button: open the overview on the app grid, or go
+/// back to the windows if it's already showing.
+pub fn showApps() void {
+    switch (state) {
+        .closed => {
+            open();
+            setMode(.apps);
+        },
+        .open, .opening => setMode(if (mode == .apps) .windows else .apps),
+        .closing => {},
     }
 }
 
@@ -372,6 +496,7 @@ fn close(target: ?*c.MetaWindow) void {
         animate(entry.item, entry.from);
     }
     dock.hide();
+    appgrid.hide();
 
     ease(dim);
     c.clutter_actor_set_opacity(dim, 0);
@@ -408,6 +533,9 @@ fn finishClose() void {
     group = null;
     dim = null;
     dock.clear();
+    search_label = null;
+    query_len = 0;
+    mode = .windows;
     n_entries = 0;
     state = .closed;
     std.log.debug("overview: closed", .{});

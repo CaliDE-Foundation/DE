@@ -26,9 +26,8 @@ pub fn create(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, width: f32, height: 
     clear();
     collectApps();
     const style = c.cali_shell_dock_style();
-    if (n_apps == 0) return 0;
-
-    const n: f32 = @floatFromInt(n_apps);
+    // One slot per app plus the Show Apps button.
+    const n: f32 = @floatFromInt(n_apps + 1);
     const dock_w = n * style.icon_size + (n - 1) * style.spacing + 2 * style.padding;
     const dock_h = style.icon_size + 2 * style.padding;
 
@@ -53,6 +52,19 @@ pub fn create(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, width: f32, height: 
             c.clutter_actor_add_child(dock, dot);
         }
     }
+
+    // Show Apps, after a little gap.
+    const show_apps = ui.roundedRect(style.icon_size, style.icon_size, 14, 0xffffff1a);
+    const grid_icon = ui.icon("view-app-grid-symbolic", 24, true, 0xffffff);
+    ui.center(grid_icon, show_apps, c.CLUTTER_ALIGN_BOTH);
+    c.clutter_actor_add_child(show_apps, grid_icon);
+    c.clutter_actor_set_pivot_point(show_apps, 0.5, 0.5);
+    c.clutter_actor_set_position(show_apps, style.padding + @as(f32, @floatFromInt(n_apps)) * (style.icon_size + style.spacing), style.padding);
+    c.clutter_actor_set_reactive(show_apps, 1);
+    plugin.connect(show_apps, "button-release-event", &onShowApps, null);
+    plugin.connect(show_apps, "enter-event", &onHover, null);
+    plugin.connect(show_apps, "leave-event", &onUnhover, null);
+    c.clutter_actor_add_child(dock, show_apps);
 
     // Rise into place with the overview.
     c.clutter_actor_set_translation(dock, 0, dock_h, 0);
@@ -98,7 +110,7 @@ fn appIcon(info: *c.GAppInfo, size: f32) *c.ClutterActor {
 
 /// `g_icon_to_string` gives a name, a path, or ". GThemedIcon name1 name2 ..."
 /// for icons with fallbacks; take the first name then.
-fn iconName(s: [:0]u8) [*:0]const u8 {
+pub fn iconName(s: [:0]u8) [*:0]const u8 {
     const prefix = ". GThemedIcon ";
     if (!std.mem.startsWith(u8, s, prefix)) return s.ptr;
     const rest = s[prefix.len..];
@@ -132,7 +144,7 @@ fn addApp(info: *c.GAppInfo, window: ?*c.MetaWindow) void {
 
 /// The desktop file for a window: GTK application ID, sandbox app ID, then
 /// WM_CLASS as given and in lower case.
-fn appForWindow(window: ?*c.MetaWindow) ?*c.GAppInfo {
+pub fn appForWindow(window: ?*c.MetaWindow) ?*c.GAppInfo {
     var candidates = [_]?[*:0]const u8{
         c.meta_window_get_gtk_application_id(window),
         c.meta_window_get_sandboxed_app_id(window),
@@ -183,6 +195,11 @@ fn onAppClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) call
         ui.launch(display, app.info);
         overview.closeTo(null);
     }
+    return 1;
+}
+
+fn onShowApps(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    overview.showApps();
     return 1;
 }
 

@@ -5,15 +5,120 @@
 
 use std::ffi::{c_char, CStr};
 
+mod calendar;
 mod dock;
 mod draw;
+mod search;
 mod icons;
 mod menu;
 mod overview;
 mod panel;
 mod workspaces;
 
+pub use calendar::CaliDay;
 pub use dock::CaliDockStyle;
+
+/// Today's date as year, month (1-12) and day.
+///
+/// # Safety
+/// Each pointer must be NULL or writable.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_calendar_today(year: *mut i32, month: *mut u32, day: *mut u32) {
+    let (y, m, d) = panel::today();
+    unsafe {
+        if !year.is_null() {
+            *year = y;
+        }
+        if !month.is_null() {
+            *month = m;
+        }
+        if !day.is_null() {
+            *day = d;
+        }
+    }
+}
+
+/// Fills `out` (42 cells, 6 weeks from Sunday) with the grid for
+/// `year`/`month` (1-12), marking today.
+///
+/// # Safety
+/// `out` must point to 42 writable `CaliDay`s.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_calendar_grid(year: i32, month: u32, out: *mut CaliDay) -> bool {
+    if out.is_null() || !(1..=12).contains(&month) {
+        return false;
+    }
+    let cells = calendar::grid(year, month, panel::today());
+    unsafe { std::ptr::copy_nonoverlapping(cells.as_ptr(), out, calendar::CELLS) };
+    true
+}
+
+/// Moves `delta` months from `*year`/`*month`, in place.
+///
+/// # Safety
+/// Both pointers must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_calendar_add_months(year: *mut i32, month: *mut u32, delta: i32) {
+    if year.is_null() || month.is_null() {
+        return;
+    }
+    let (y, m) = calendar::add_months(unsafe { *year }, unsafe { *month }, delta);
+    unsafe {
+        *year = y;
+        *month = m;
+    }
+}
+
+/// Formats a date with strftime (`format`) in the user's locale into `buf`.
+/// Day 0 means today. Returns the length written.
+///
+/// # Safety
+/// `format` must be a C string and `buf` must point to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_format_date(
+    year: i32,
+    month: u32,
+    day: u32,
+    format: *const c_char,
+    buf: *mut c_char,
+    len: usize,
+) -> usize {
+    if format.is_null() || buf.is_null() || len == 0 {
+        return 0;
+    }
+    let date = if day == 0 { None } else { Some((year, month, day)) };
+    let text = panel::format_date(date, unsafe { CStr::from_ptr(format) });
+    write_c_string(&text, buf, len)
+}
+
+/// Scores how well `query` matches `text` for search: higher is better,
+/// -1 for no match.
+///
+/// # Safety
+/// Both must be NULL or valid C strings.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_search_score(query: *const c_char, text: *const c_char) -> i32 {
+    if query.is_null() || text.is_null() {
+        return -1;
+    }
+    let q = unsafe { CStr::from_ptr(query) }.to_string_lossy();
+    let t = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+    search::score(&q, &t).map_or(-1, |s| s as i32)
+}
+
+/// Copies `text` into `buf` as a C string, truncating at a character
+/// boundary. Returns the length written (without the NUL).
+fn write_c_string(text: &str, buf: *mut c_char, len: usize) -> usize {
+    let mut end = text.len().min(len - 1);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(text.as_ptr(), buf.cast::<u8>(), end);
+        *buf.add(end) = 0;
+    }
+    end
+}
 pub use menu::{CaliMenuAction, CaliMenuStyle};
 pub use overview::CaliRect;
 pub use workspaces::CaliDotStyle;

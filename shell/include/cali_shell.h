@@ -41,6 +41,11 @@ typedef struct {
   float status_icon_size;
 } CaliMenuStyle;
 
+typedef struct {
+  unsigned char day;
+  bool in_month, today;
+} CaliDay;
+
 const char *cali_shell_version(void);
 CaliShell  *cali_shell_new(void);
 bool        cali_shell_start(CaliShell *shell);
@@ -73,6 +78,16 @@ const char   *cali_shell_dock_favorite(size_t i);
 CaliMenuStyle cali_shell_menu_style(void);
 const char   *cali_shell_menu_entry(size_t i, CaliMenuAction *action);
 const char   *cali_shell_status_icon(size_t i);
+
+/* Calendar (months 1-12, weeks start on Sunday) */
+void   cali_shell_calendar_today(int *year, unsigned int *month, unsigned int *day);
+bool   cali_shell_calendar_grid(int year, unsigned int month, CaliDay *out /* 42 */);
+void   cali_shell_calendar_add_months(int *year, unsigned int *month, int delta);
+size_t cali_shell_format_date(int year, unsigned int month, unsigned int day /* 0 = today */,
+                              const char *format, char *buf, size_t len);
+
+/* Search: higher is better, -1 = no match */
+int cali_shell_search_score(const char *query, const char *text);
 
 /* Activities overview */
 size_t cali_shell_overview_layout(CaliRect area, const CaliRect *windows,

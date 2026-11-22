@@ -16,9 +16,7 @@ var stage: ?*c.ClutterActor = null;
 var panel: ?*c.ClutterActor = null;
 var style: c.CaliMenuStyle = undefined;
 
-var catcher: ?*c.ClutterActor = null; // full-screen, catches clicks outside the menu
-var popup: ?*c.ClutterActor = null;
-var grab: ?*c.ClutterGrab = null;
+var popup: ?*c.ClutterActor = null; // our content while the menu is open
 
 pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     display = d;
@@ -51,12 +49,12 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
 }
 
 fn onStatusClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    if (catcher == null) open() else close();
+    if (popup == null) open() else close();
     return 1;
 }
 
 fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {
-    if (catcher == null) open();
+    if (popup == null) open();
     return 0;
 }
 
@@ -84,29 +82,11 @@ fn show(rows: []const Row) void {
     var stage_h: f32 = 0;
     c.clutter_actor_get_size(s, &stage_w, &stage_h);
 
-    const first_open = catcher == null;
-    if (first_open) {
-        const ct = c.clutter_actor_new();
-        c.clutter_actor_set_size(ct, stage_w, stage_h);
-        c.clutter_actor_set_reactive(ct, 1);
-        c.clutter_actor_add_child(s, ct);
-        plugin.connect(ct, "button-release-event", &onOutsideClicked, null);
-        plugin.connect(ct, "key-press-event", &onKey, null);
-        grab = c.clutter_stage_grab(@ptrCast(@alignCast(s)), ct);
-        c.clutter_stage_set_key_focus(@ptrCast(@alignCast(s)), ct);
-        catcher = ct;
-    }
-    if (popup) |old| c.clutter_actor_destroy(old);
-
     const n: f32 = @floatFromInt(rows.len);
     const height = n * style.row_height + 2 * style.padding;
     const p = ui.roundedRect(style.width, height, style.corner_radius, style.background);
     const top: f32 = @as(f32, @floatFromInt(c.cali_shell_panel_height())) + 6;
     c.clutter_actor_set_position(p, stage_w - style.width - 8, top);
-    c.clutter_actor_set_reactive(p, 1); // clicks on the padding don't close it
-    plugin.connect(p, "button-release-event", &swallow, null);
-    c.clutter_actor_add_child(catcher, p);
-    popup = p;
 
     const row_w = style.width - 2 * style.padding;
     for (rows, 0..) |row, i| {
@@ -131,43 +111,16 @@ fn show(rows: []const Row) void {
         c.clutter_actor_add_child(p, r);
     }
 
-    if (first_open) {
-        c.clutter_actor_set_pivot_point(p, 1.0, 0.0);
-        c.clutter_actor_set_opacity(p, 0);
-        c.clutter_actor_set_scale(p, 0.95, 0.95);
-        ui.ease(p, 150, c.CLUTTER_EASE_OUT_QUAD);
-        c.clutter_actor_set_opacity(p, 255);
-        c.clutter_actor_set_scale(p, 1.0, 1.0);
-        c.clutter_actor_restore_easing_state(p);
-    }
+    if (popup == null) ui.openPopup(p, &onClosed) else ui.setPopupContent(p);
+    popup = p;
 }
 
-pub fn close() void {
-    if (grab) |g| {
-        c.clutter_grab_dismiss(g);
-        c.g_object_unref(g);
-        grab = null;
-    }
-    if (catcher) |ct| c.clutter_actor_destroy(ct);
-    catcher = null;
+fn onClosed() void {
     popup = null;
 }
 
-fn swallow(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    return 1;
-}
-
-fn onOutsideClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    close();
-    return 1;
-}
-
-fn onKey(_: ?*c.ClutterActor, event: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    if (c.clutter_event_get_key_symbol(event) == c.CLUTTER_KEY_Escape) {
-        close();
-        return 1;
-    }
-    return 0;
+pub fn close() void {
+    ui.closePopup();
 }
 
 fn onRowEnter(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, hover: c.gpointer) callconv(.C) c.gboolean {

@@ -67,7 +67,8 @@ container-image:
 # host builds aren't mixed with container builds.
 CONTAINER_RUN = $(PODMAN) run --rm -v $(CURDIR):/src:Z \
 	  -e CARGO_TARGET_DIR=/src/out/container/target \
-	  -e ZIG_LOCAL_CACHE_DIR=/src/out/container/zig-cache
+	  -e ZIG_LOCAL_CACHE_DIR=/src/out/container/zig-cache \
+	  -e GOMODCACHE=/src/out/container/gomod -e GOCACHE=/src/out/container/gocache
 
 container: container-image
 	$(CONTAINER_RUN) $(DEV_IMAGE) bash -c '\
@@ -87,10 +88,11 @@ devkit: container-image
 	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
-	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES \
+	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES -e CALI_DEBUG_APPS -e CALI_DEBUG_SEARCH -e CALI_DEBUG_CALENDAR -e CALI_DEBUG_SWITCHER -e CALI_DEBUG_NOTIFY \
 	  $(DEV_IMAGE) bash -c '\
 	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) compositor-sookie-container; \
+	    make JOBS=$(JOBS) OUT=out/container/bin services; \
 	    trap "trap - TERM INT; kill -TERM 0" TERM INT; \
 	    scripts/devkit.sh out/container/bin/cali-compositor & wait $$!'
 
