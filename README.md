@@ -86,6 +86,23 @@ calictl 0.1.0
 > [!TIP]
 > Builds run with low priority and 2 jobs by default. Use `make JOBS=8` on a machine with better cooling.
 
+### With Sookie
+
+`cali-compositor` starts the real compositor when it's built against Sookie. Sookie's CI
+publishes every build of `main` as a
+[nightly release](https://github.com/CaliDE-Foundation/Sookie/releases/tag/nightly),
+so you don't have to compile it yourself.
+
+```sh
+make sookie-fetch        # download the latest Sookie into out/sookie/root
+make compositor-sookie   # link cali-compositor against it (needs Sookie's libraries)
+make container           # any distro: build and test it all in Fedora 45 with podman
+```
+
+`make container` installs the nightly Sookie inside a Fedora 45 container, builds
+everything against it, then starts Cali headless for a few seconds to check that it runs.
+Container builds go to `out/container/`.
+
 Every push and pull request is also built by
 [GitHub Actions](https://github.com/CaliDE-Foundation/DE/actions/workflows/build.yml).
 Download the `calide-x86_64` artifact from any run.
@@ -94,7 +111,8 @@ Download the `calide-x86_64` artifact from any run.
 
 - [x] Project layout: Zig compositor, Rust shell, Go services
 - [x] Zig ↔ Rust C ABI working
-- [ ] `cali-compositor` starts Sookie in a nested Wayland session
+- [x] `cali-compositor` starts Sookie (headless, tested in CI)
+- [ ] Nested Wayland session in a window (`--devkit`)
 - [ ] Shell basics at GNOME parity: top bar, Activities overview, app grid
 - [ ] `cali-settingsd` on D-Bus, `calictl get/set`
 - [ ] The customization layer, the reason Cali exists
