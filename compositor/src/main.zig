@@ -21,12 +21,10 @@ pub fn main() !u8 {
         return 1;
     }
 
-    if (!build_options.with_sookie) {
+    if (build_options.with_sookie) {
+        return @import("sookie.zig").run();
+    } else {
         std.log.warn("built without Sookie (-Dsookie=false); no display server started", .{});
         return 0;
     }
-
-    // TODO: meta_context_new("Cali"), register the Cali MetaPlugin,
-    // meta_context_setup / start / run_main_loop.
-    return 0;
 }

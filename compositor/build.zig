@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
         "Path to libcali_shell.a",
     ) orelse "../target/release/libcali_shell.a";
 
-    // Turn on once libsookie is installed (make sookie).
+    // Link and start Sookie. Needs libsookie-52 (see `make compositor-sookie`).
     const with_sookie = b.option(bool, "sookie", "Link against libsookie") orelse false;
 
     const exe = b.addExecutable(.{
@@ -35,8 +35,9 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("gcc_s"); // unwinder used by Rust std
 
     if (with_sookie) {
-        // Installed by Sookie as libsookie-52.pc.
-        exe.linkSystemLibrary("libsookie-52");
+        // Found through pkg-config (libsookie-52.pc). Run `make sookie-fetch`
+        // to get a prebuilt Sookie, or install one system-wide.
+        exe.linkSystemLibrary2("libsookie-52", .{ .use_pkg_config = .force });
     }
 
     b.installArtifact(exe);

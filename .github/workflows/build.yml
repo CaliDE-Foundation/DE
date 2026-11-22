@@ -48,3 +48,35 @@ jobs:
           name: calide-x86_64
           path: out/bin/
           retention-days: 14
+
+  sookie:
+    name: With Sookie (Fedora 45)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: scripts/fedora-deps.sh
+
+      - name: Install latest Sookie
+        run: |
+          curl -fL --retry 3 \
+            https://github.com/CaliDE-Foundation/Sookie/releases/download/nightly/sookie-x86_64.tar.xz \
+            | tar -C / -xJ
+          echo "Sookie $(curl -fsL https://github.com/CaliDE-Foundation/Sookie/releases/download/nightly/sookie-x86_64.commit)"
+
+      - name: Build with Sookie
+        run: make compositor-sookie services
+
+      - name: Start Sookie headless
+        run: make smoke-sookie
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: calide-sookie-fedora45-x86_64
+          path: out/bin/
+          retention-days: 14

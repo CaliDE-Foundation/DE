@@ -1,0 +1,6 @@
+# Fedora 45 image with everything CaliDE needs to build against Sookie.
+# Built and used by `make container`.
+FROM registry.fedoraproject.org/fedora:45
+COPY scripts/fedora-deps.sh /usr/local/sbin/fedora-deps.sh
+RUN /usr/local/sbin/fedora-deps.sh
+WORKDIR /src
