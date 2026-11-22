@@ -5,7 +5,10 @@
 
 use std::ffi::{c_char, CStr};
 
+mod overview;
 mod panel;
+
+pub use overview::CaliRect;
 
 const VERSION: &CStr = c"0.1.0";
 
@@ -79,6 +82,28 @@ pub unsafe extern "C" fn cali_shell_clock_text(buf: *mut c_char, len: usize) -> 
         *buf.add(bytes.len()) = 0;
     }
     bytes.len()
+}
+
+/// Lays out `n` windows for the Activities overview inside `area`.
+/// Writes `n` target rectangles to `out` and returns how many were written.
+///
+/// # Safety
+/// `windows` must point to `n` readable rects and `out` to `n` writable rects.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_overview_layout(
+    area: CaliRect,
+    windows: *const CaliRect,
+    n: usize,
+    out: *mut CaliRect,
+) -> usize {
+    if n == 0 || windows.is_null() || out.is_null() {
+        return 0;
+    }
+    let input = unsafe { std::slice::from_raw_parts(windows, n) };
+    let placed = overview::layout(area, input);
+    let out = unsafe { std::slice::from_raw_parts_mut(out, placed.len()) };
+    out.copy_from_slice(&placed);
+    placed.len()
 }
 
 /// Frees a shell created by `cali_shell_new`. A NULL pointer is ignored.

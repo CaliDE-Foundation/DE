@@ -13,6 +13,10 @@ extern "C" {
 
 typedef struct CaliShell CaliShell;
 
+typedef struct {
+  float x, y, width, height;
+} CaliRect;
+
 const char *cali_shell_version(void);
 CaliShell  *cali_shell_new(void);
 bool        cali_shell_start(CaliShell *shell);
@@ -21,6 +25,10 @@ void        cali_shell_free(CaliShell *shell);
 /* Top bar */
 unsigned int cali_shell_panel_height(void);
 size_t       cali_shell_clock_text(char *buf, size_t len);
+
+/* Activities overview */
+size_t cali_shell_overview_layout(CaliRect area, const CaliRect *windows,
+                                  size_t n, CaliRect *out);
 
 #ifdef __cplusplus
 }

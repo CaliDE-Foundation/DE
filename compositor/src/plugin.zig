@@ -4,6 +4,7 @@
 //! bar shows comes from cali-shell (Rust); this file only draws it with Clutter.
 
 const std = @import("std");
+const overview = @import("overview.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -90,6 +91,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     background_group = group;
 
     createPanel(stage);
+    overview.init(d, stage, panel);
 
     connect(monitor_manager, "monitors-changed", &onMonitorsChanged, null);
     connect(c.meta_display_get_workspace_manager(d), "workspace-added", &onWorkspaceAdded, null);
@@ -99,15 +101,21 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     c.clutter_actor_show(stage);
 }
 
-fn connect(instance: anytype, signal: [*:0]const u8, handler: anytype, data: c.gpointer) void {
+pub fn connect(instance: anytype, signal: [*:0]const u8, handler: anytype, data: c.gpointer) void {
     _ = c.g_signal_connect_data(instance, signal, @ptrCast(handler), data, null, 0);
 }
 
 // ---- Background -----------------------------------------------------------------
 
 fn onMonitorsChanged(_: ?*c.MetaMonitorManager, _: c.gpointer) callconv(.C) void {
+    if (background_group) |group| fillBackground(group);
+    layoutPanel();
+}
+
+/// Replaces the children of `group` with one background actor per monitor.
+/// Used for the desktop and, separately, for the overview.
+pub fn fillBackground(group: *c.ClutterActor) void {
     const d = display orelse return;
-    const group = background_group orelse return;
 
     c.clutter_actor_destroy_all_children(group);
     const n = c.meta_display_get_n_monitors(d);
@@ -131,8 +139,6 @@ fn onMonitorsChanged(_: ?*c.MetaMonitorManager, _: c.gpointer) callconv(.C) void
 
         c.clutter_actor_add_child(group, actor);
     }
-
-    layoutPanel();
 }
 
 // ---- Top bar ---------------------------------------------------------------------
@@ -204,8 +210,9 @@ fn sameEnum(a: anytype, b: anytype) bool {
     return @as(i64, @intCast(a)) == @as(i64, @intCast(b));
 }
 
-fn shouldAnimate(window_actor: ?*c.MetaWindowActor) bool {
-    const kind = c.meta_window_get_window_type(c.meta_window_actor_get_meta_window(window_actor));
+/// Normal app windows and dialogs: the ones that animate and show in the overview.
+pub fn isAppWindow(window: ?*c.MetaWindow) bool {
+    const kind = c.meta_window_get_window_type(window);
     return sameEnum(kind, c.META_WINDOW_NORMAL) or
         sameEnum(kind, c.META_WINDOW_DIALOG) or
         sameEnum(kind, c.META_WINDOW_MODAL_DIALOG);
@@ -213,10 +220,12 @@ fn shouldAnimate(window_actor: ?*c.MetaWindowActor) bool {
 
 /// New windows fade in while growing slightly, like GNOME.
 fn map(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
-    if (!shouldAnimate(window_actor)) {
+    if (!isAppWindow(c.meta_window_actor_get_meta_window(window_actor))) {
         c.meta_plugin_map_completed(plugin, window_actor);
         return;
     }
+
+    overview.windowMapped();
 
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
     c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);

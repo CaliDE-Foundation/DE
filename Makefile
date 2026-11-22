@@ -76,7 +76,8 @@ container: container-image
 
 # Open Cali in a window on your desktop (Sookie's devkit) and start an app
 # inside it. Close the window or press Ctrl+C to stop.
-# Pick the app with CALI_APP=..., e.g. `make devkit CALI_APP=gnome-text-editor`.
+# Pick apps with CALI_APP, separated by ";", e.g. CALI_APP="gnome-text-editor;gnome-text-editor --new-window".
+# CALI_DEBUG_OVERVIEW=<seconds> opens the overview after that many seconds.
 HOST_WAYLAND := $(if $(filter /%,$(WAYLAND_DISPLAY)),$(WAYLAND_DISPLAY),$(XDG_RUNTIME_DIR)/$(WAYLAND_DISPLAY))
 CALI_APP     ?= gnome-text-editor
 PODMAN_TTY   ?= -it
@@ -86,7 +87,7 @@ devkit: container-image
 	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
-	  -e CALI_APP=$(CALI_APP) \
+	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK \
 	  $(DEV_IMAGE) bash -c '\
 	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) compositor-sookie-container; \
