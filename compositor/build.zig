@@ -35,8 +35,8 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("gcc_s"); // unwinder used by Rust std
 
     if (with_sookie) {
-        // Sookie still installs under Mutter's library name for now.
-        exe.linkSystemLibrary("libmutter-52");
+        // Installed by Sookie as libsookie-52.pc.
+        exe.linkSystemLibrary("libsookie-52");
     }
 
     b.installArtifact(exe);
