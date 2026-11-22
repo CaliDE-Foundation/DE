@@ -15,7 +15,7 @@ const GError = extern struct {
 
 extern fn meta_create_context(name: [*:0]const u8) ?*Context;
 extern fn meta_context_configure(ctx: *Context, argc: *c_int, argv: *[*][*:0]u8, err: *?*GError) c_int;
-extern fn meta_context_set_plugin_name(ctx: *Context, name: [*:0]const u8) void;
+extern fn meta_context_set_plugin_gtype(ctx: *Context, gtype: usize) void;
 extern fn meta_context_setup(ctx: *Context, err: *?*GError) c_int;
 extern fn meta_context_start(ctx: *Context, err: *?*GError) c_int;
 extern fn meta_context_notify_ready(ctx: *Context) void;
@@ -45,8 +45,8 @@ pub fn run() u8 {
 
     if (meta_context_configure(ctx, &argc, &argv, &err) == 0) return fail("configure", err);
 
-    // TODO: replace with Cali's own MetaPlugin once the shell draws something.
-    meta_context_set_plugin_name(ctx, "libdefault");
+    // Cali's own plugin: background, top bar and window animations.
+    meta_context_set_plugin_gtype(ctx, @import("plugin.zig").getType());
 
     if (meta_context_setup(ctx, &err) == 0) return fail("set up", err);
     if (meta_context_start(ctx, &err) == 0) return fail("start", err);

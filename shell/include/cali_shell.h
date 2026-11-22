@@ -5,6 +5,7 @@
 #define CALI_SHELL_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,10 @@ const char *cali_shell_version(void);
 CaliShell  *cali_shell_new(void);
 bool        cali_shell_start(CaliShell *shell);
 void        cali_shell_free(CaliShell *shell);
+
+/* Top bar */
+unsigned int cali_shell_panel_height(void);
+size_t       cali_shell_clock_text(char *buf, size_t len);
 
 #ifdef __cplusplus
 }
