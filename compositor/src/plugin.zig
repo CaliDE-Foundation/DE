@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const overview = @import("overview.zig");
+const workspaces = @import("workspaces.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -74,6 +75,8 @@ fn classInit(klass: c.gpointer, _: c.gpointer) callconv(.C) void {
     k.start = &start;
     k.map = &map;
     k.kill_window_effects = &killWindowEffects;
+    k.switch_workspace = &workspaces.switchWorkspace;
+    k.kill_switch_workspace = &workspaces.killSwitchWorkspace;
 }
 
 // ---- Startup ------------------------------------------------------------------
@@ -92,6 +95,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
 
     createPanel(stage);
     overview.init(d, stage, panel);
+    workspaces.init(d, stage, panel);
 
     connect(monitor_manager, "monitors-changed", &onMonitorsChanged, null);
     connect(c.meta_display_get_workspace_manager(d), "workspace-added", &onWorkspaceAdded, null);

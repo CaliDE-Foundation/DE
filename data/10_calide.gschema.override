@@ -1,0 +1,3 @@
+# Cali defaults for Sookie (Mutter) settings, same as GNOME ships.
+[org.gnome.mutter]
+dynamic-workspaces=true

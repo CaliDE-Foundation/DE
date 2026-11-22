@@ -87,7 +87,7 @@ devkit: container-image
 	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
-	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK \
+	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES \
 	  $(DEV_IMAGE) bash -c '\
 	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) compositor-sookie-container; \

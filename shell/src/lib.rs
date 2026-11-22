@@ -5,10 +5,13 @@
 
 use std::ffi::{c_char, CStr};
 
+mod draw;
 mod overview;
 mod panel;
+mod workspaces;
 
 pub use overview::CaliRect;
+pub use workspaces::CaliDotStyle;
 
 const VERSION: &CStr = c"0.1.0";
 
@@ -104,6 +107,66 @@ pub unsafe extern "C" fn cali_shell_overview_layout(
     let out = unsafe { std::slice::from_raw_parts_mut(out, placed.len()) };
     out.copy_from_slice(&placed);
     placed.len()
+}
+
+/// Look of the workspace dots in the top bar.
+#[no_mangle]
+pub extern "C" fn cali_shell_workspace_dots_style() -> CaliDotStyle {
+    workspaces::DOTS
+}
+
+/// Decides how to keep GNOME-style dynamic workspaces. `occupied[i]` says
+/// whether workspace `i` has windows. Writes the workspaces to remove
+/// (highest index first) to `remove_out` and returns how many; sets
+/// `*append_out` when an empty workspace should be added at the end.
+///
+/// # Safety
+/// `occupied` must point to `n` bools, `remove_out` to `cap` writable u32s,
+/// and `append_out` to a writable bool.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_workspace_plan(
+    occupied: *const bool,
+    n: usize,
+    active: usize,
+    remove_out: *mut u32,
+    cap: usize,
+    append_out: *mut bool,
+) -> usize {
+    if append_out.is_null() || (n > 0 && occupied.is_null()) || (cap > 0 && remove_out.is_null()) {
+        return 0;
+    }
+    let occupied = if n == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(occupied, n) } };
+    let plan = workspaces::plan(occupied, active);
+    unsafe { *append_out = plan.append };
+    let count = plan.remove.len().min(cap);
+    for (i, index) in plan.remove.iter().take(count).enumerate() {
+        unsafe { *remove_out.add(i) = *index as u32 };
+    }
+    count
+}
+
+/// Renders an anti-aliased rounded rectangle as premultiplied RGBA into
+/// `buf` (`width * height * 4` bytes). `rgba` is 0xRRGGBBAA. Returns false if
+/// `buf` is NULL or too small.
+///
+/// # Safety
+/// `buf` must point to at least `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_render_rounded_rect(
+    width: u32,
+    height: u32,
+    radius: f32,
+    rgba: u32,
+    buf: *mut u8,
+    len: usize,
+) -> bool {
+    let (w, h) = (width as usize, height as usize);
+    if buf.is_null() || len < w * h * 4 {
+        return false;
+    }
+    let pixels = draw::rounded_rect(w, h, radius, rgba.to_be_bytes());
+    unsafe { std::ptr::copy_nonoverlapping(pixels.as_ptr(), buf, pixels.len()) };
+    true
 }
 
 /// Frees a shell created by `cali_shell_new`. A NULL pointer is ignored.
