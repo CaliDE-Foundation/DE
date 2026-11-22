@@ -1,0 +1,3 @@
+[submodule "sookie"]
+	path = sookie
+	url = https://github.com/CaliDE-Foundation/Sookie.git

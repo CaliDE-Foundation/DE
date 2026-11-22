@@ -1,0 +1,4 @@
+/target/
+/out/
+compositor/.zig-cache/
+compositor/zig-out/

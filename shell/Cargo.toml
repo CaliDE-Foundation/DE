@@ -1,0 +1,11 @@
+[package]
+name = "cali-shell"
+description = "The Cali desktop shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "cali_shell"
+crate-type = ["staticlib", "rlib"]
