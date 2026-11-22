@@ -6,6 +6,8 @@
 const std = @import("std");
 const overview = @import("overview.zig");
 const workspaces = @import("workspaces.zig");
+const statusmenu = @import("statusmenu.zig");
+const ui = @import("ui.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -26,6 +28,9 @@ pub const c = @cImport({
     @cInclude("meta/window.h");
     @cInclude("clutter/clutter.h");
     @cInclude("clutter/clutter-pango.h");
+    @cInclude("meta/meta-startup-notification.h");
+    @cInclude("meta/meta-launch-context.h");
+    @cInclude("gio/gdesktopappinfo.h");
     @cInclude("cali_shell.h");
 });
 
@@ -93,9 +98,11 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     c.clutter_actor_insert_child_below(c.meta_compositor_get_window_group(compositor), group, null);
     background_group = group;
 
+    ui.init(stage);
     createPanel(stage);
     overview.init(d, stage, panel);
     workspaces.init(d, stage, panel);
+    statusmenu.init(d, stage, panel);
 
     connect(monitor_manager, "monitors-changed", &onMonitorsChanged, null);
     connect(c.meta_display_get_workspace_manager(d), "workspace-added", &onWorkspaceAdded, null);

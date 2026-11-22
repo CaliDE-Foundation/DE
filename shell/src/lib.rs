@@ -5,13 +5,92 @@
 
 use std::ffi::{c_char, CStr};
 
+mod dock;
 mod draw;
+mod icons;
+mod menu;
 mod overview;
 mod panel;
 mod workspaces;
 
+pub use dock::CaliDockStyle;
+pub use menu::{CaliMenuAction, CaliMenuStyle};
 pub use overview::CaliRect;
 pub use workspaces::CaliDotStyle;
+
+/// Loads icon `name` (a theme icon name or an absolute path) as a `size` x
+/// `size` premultiplied RGBA image into `buf`. Falls back to a generic app
+/// icon. When `recolor` is true every pixel becomes `rgb` (0xRRGGBB), for
+/// symbolic icons. Returns false if nothing could be loaded.
+///
+/// # Safety
+/// `name` must be a valid C string and `buf` must point to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_load_icon(
+    name: *const c_char,
+    size: u32,
+    recolor: bool,
+    rgb: u32,
+    buf: *mut u8,
+    len: usize,
+) -> bool {
+    let needed = size as usize * size as usize * 4;
+    if name.is_null() || buf.is_null() || len < needed || size == 0 {
+        return false;
+    }
+    let Ok(name) = unsafe { CStr::from_ptr(name) }.to_str() else {
+        return false;
+    };
+    let Some(mut pixels) = icons::load_named(name, size) else {
+        return false;
+    };
+    if recolor {
+        let [_, r, g, b] = rgb.to_be_bytes();
+        icons::recolor(&mut pixels, [r, g, b]);
+    }
+    unsafe { std::ptr::copy_nonoverlapping(pixels.as_ptr(), buf, needed) };
+    true
+}
+
+/// Look of the dock.
+#[no_mangle]
+pub extern "C" fn cali_shell_dock_style() -> CaliDockStyle {
+    dock::STYLE
+}
+
+/// The `i`th favorite app's desktop file ID, or NULL past the end.
+#[no_mangle]
+pub extern "C" fn cali_shell_dock_favorite(i: usize) -> *const c_char {
+    dock::favorites().get(i).map_or(std::ptr::null(), |id| id.as_ptr())
+}
+
+/// Look of the system menu.
+#[no_mangle]
+pub extern "C" fn cali_shell_menu_style() -> CaliMenuStyle {
+    menu::STYLE
+}
+
+/// The `i`th system menu entry's label (NULL past the end); its action is
+/// written to `action`.
+///
+/// # Safety
+/// `action` must be NULL or point to a writable `CaliMenuAction`.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_menu_entry(i: usize, action: *mut CaliMenuAction) -> *const c_char {
+    let Some(entry) = menu::ENTRIES.get(i) else {
+        return std::ptr::null();
+    };
+    if !action.is_null() {
+        unsafe { *action = entry.action };
+    }
+    entry.label.as_ptr()
+}
+
+/// The `i`th status icon name in the top bar, or NULL past the end.
+#[no_mangle]
+pub extern "C" fn cali_shell_status_icon(i: usize) -> *const c_char {
+    menu::STATUS_ICONS.get(i).map_or(std::ptr::null(), |n| n.as_ptr())
+}
 
 const VERSION: &CStr = c"0.1.0";
 

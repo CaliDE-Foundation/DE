@@ -4,17 +4,26 @@
 
 const std = @import("std");
 const plugin = @import("plugin.zig");
+const dock = @import("dock.zig");
+const ui = @import("ui.zig");
 const c = plugin.c;
 
 const duration_ms = 250;
 const dim_opacity = 110;
 const margin: f32 = 48.0;
 const max_windows = 64;
+const title_space: f32 = 40.0; // room under each window for its title
+const title_font = "Adwaita Sans 10";
+const close_size: f32 = 28.0;
 
 const State = enum { closed, opening, open, closing };
 
+/// One window in the overview: a card holding a live clone, a title pill
+/// below it and a close button on its corner (shown on hover).
 const Entry = struct {
-    clone: *c.ClutterActor,
+    item: *c.ClutterActor,
+    title: *c.ClutterActor,
+    close_button: *c.ClutterActor,
     window: *c.MetaWindow,
     from: c.CaliRect,
 };
@@ -31,6 +40,7 @@ var hot_corner: ?*c.ClutterActor = null;
 var hot_corner_armed = false;
 var entries: [max_windows]Entry = undefined;
 var n_entries: usize = 0;
+var layout_area = c.CaliRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
 
 const black = c.CoglColor{ .red = 0, .green = 0, .blue = 0, .alpha = 255 };
 
@@ -127,12 +137,6 @@ fn open() void {
 
     var work: c.MtkRectangle = undefined;
     c.meta_workspace_get_work_area_for_monitor(workspace, primary, &work);
-    const area = c.CaliRect{
-        .x = @as(f32, @floatFromInt(work.x)) + margin,
-        .y = @as(f32, @floatFromInt(work.y)) + margin,
-        .width = @as(f32, @floatFromInt(work.width)) - 2 * margin,
-        .height = @as(f32, @floatFromInt(work.height)) - 2 * margin,
-    };
 
     var stage_w: f32 = 0;
     var stage_h: f32 = 0;
@@ -158,8 +162,19 @@ fn open() void {
     c.clutter_actor_add_child(g, dm);
     dim = dm;
 
-    // One live clone per window on this workspace, in stacking order.
-    var rects: [max_windows]c.CaliRect = undefined;
+    // The dock sits at the bottom; windows get the space above it, with room
+    // for their titles.
+    const dock_height = dock.create(d, g, stage_w, stage_h);
+    const work_top = @as(f32, @floatFromInt(work.y));
+    const work_bottom = @min(@as(f32, @floatFromInt(work.y + work.height)), stage_h - dock_height);
+    layout_area = .{
+        .x = @as(f32, @floatFromInt(work.x)) + margin,
+        .y = work_top + margin,
+        .width = @as(f32, @floatFromInt(work.width)) - 2 * margin,
+        .height = work_bottom - work_top - 2 * margin - title_space,
+    };
+
+    // One card per window on this workspace, in stacking order.
     n_entries = 0;
     var node = c.meta_compositor_get_window_actors(compositor);
     while (node != null and n_entries < max_windows) : (node = node.*.next) {
@@ -175,22 +190,12 @@ fn open() void {
         c.clutter_actor_get_position(actor, &from.x, &from.y);
         c.clutter_actor_get_size(actor, &from.width, &from.height);
 
-        const clone = c.clutter_clone_new(actor);
-        c.clutter_actor_set_position(clone, from.x, from.y);
-        c.clutter_actor_set_size(clone, from.width, from.height);
-        c.clutter_actor_set_reactive(clone, 1);
-        c.clutter_actor_add_child(g, clone);
-        plugin.connect(clone, "button-release-event", &onCloneClicked, @ptrFromInt(n_entries + 1));
-
-        entries[n_entries] = .{ .clone = clone, .window = window, .from = from };
-        rects[n_entries] = from;
+        entries[n_entries] = makeCard(g, actor, window, from);
         n_entries += 1;
     }
 
-    var targets: [max_windows]c.CaliRect = undefined;
-    const placed = c.cali_shell_overview_layout(area, &rects, n_entries, &targets);
     std.log.debug("overview: {d} windows", .{n_entries});
-    for (entries[0..placed], targets[0..placed]) |entry, to| animate(entry.clone, to);
+    relayout();
 
     ease(dm);
     c.clutter_actor_set_opacity(dm, dim_opacity);
@@ -213,6 +218,76 @@ fn ease(actor: ?*c.ClutterActor) void {
     c.clutter_actor_set_easing_duration(actor, duration_ms);
 }
 
+fn makeCard(parent: ?*c.ClutterActor, actor: *c.ClutterActor, window: *c.MetaWindow, from: c.CaliRect) Entry {
+    const item = c.clutter_actor_new();
+    c.clutter_actor_set_position(item, from.x, from.y);
+    c.clutter_actor_set_size(item, from.width, from.height);
+    c.clutter_actor_set_reactive(item, 1);
+
+    const clone = c.clutter_clone_new(actor);
+    c.clutter_actor_add_constraint(clone, c.clutter_bind_constraint_new(item, @intCast(c.CLUTTER_BIND_SIZE), 0));
+    c.clutter_actor_add_child(item, clone);
+
+    // Title pill, centered under the window.
+    const text = ui.label(c.meta_window_get_title(window) orelse "", title_font);
+    const text_w = @min(ui.preferredWidth(text), 280);
+    const text_h = ui.preferredHeight(text);
+    c.clutter_actor_set_width(text, text_w);
+    const pill_h = text_h + 10;
+    const title = ui.roundedRect(text_w + 24, pill_h, pill_h / 2, 0x000000b0);
+    c.clutter_actor_set_position(text, 12, 5);
+    c.clutter_actor_add_child(title, text);
+    ui.center(title, item, c.CLUTTER_ALIGN_X_AXIS);
+    c.clutter_actor_add_constraint(title, c.clutter_align_constraint_new(item, @intCast(c.CLUTTER_ALIGN_Y_AXIS), 1.0));
+    c.clutter_actor_set_translation(title, 0, pill_h + 10, 0);
+    c.clutter_actor_set_opacity(title, 0);
+    c.clutter_actor_add_child(item, title);
+
+    // Close button on the top-right corner.
+    const button = ui.roundedRect(close_size, close_size, close_size / 2, 0x3a3a3aff);
+    const x_icon = ui.icon("window-close-symbolic", 16, true, 0xffffff);
+    ui.center(x_icon, button, c.CLUTTER_ALIGN_BOTH);
+    c.clutter_actor_add_child(button, x_icon);
+    c.clutter_actor_add_constraint(button, c.clutter_align_constraint_new(item, @intCast(c.CLUTTER_ALIGN_X_AXIS), 1.0));
+    c.clutter_actor_set_translation(button, close_size / 2 - 4, -(close_size / 2 - 4), 0);
+    c.clutter_actor_set_opacity(button, 0);
+    c.clutter_actor_set_reactive(button, 1);
+    c.clutter_actor_add_child(item, button);
+
+    plugin.connect(item, "button-release-event", &onItemClicked, item);
+    plugin.connect(button, "button-release-event", &onCloseClicked, item);
+    plugin.connect(item, "enter-event", &onItemEnter, button);
+    plugin.connect(item, "leave-event", &onItemLeave, button);
+    c.clutter_actor_add_child(parent, item);
+
+    return .{ .item = item, .title = title, .close_button = button, .window = window, .from = from };
+}
+
+/// Places every card in the grid from cali-shell, animating there.
+fn relayout() void {
+    var rects: [max_windows]c.CaliRect = undefined;
+    for (entries[0..n_entries], 0..) |entry, i| rects[i] = entry.from;
+    var targets: [max_windows]c.CaliRect = undefined;
+    const placed = c.cali_shell_overview_layout(layout_area, &rects, n_entries, &targets);
+    for (entries[0..placed], targets[0..placed]) |entry, to| {
+        animate(entry.item, to);
+        fade(entry.title, 255);
+    }
+}
+
+fn fade(actor: ?*c.ClutterActor, opacity: u8) void {
+    ui.ease(actor, 150, c.CLUTTER_EASE_OUT_QUAD);
+    c.clutter_actor_set_opacity(actor, opacity);
+    c.clutter_actor_restore_easing_state(actor);
+}
+
+fn entryIndex(item: c.gpointer) ?usize {
+    for (entries[0..n_entries], 0..) |entry, i| {
+        if (@as(c.gpointer, entry.item) == item) return i;
+    }
+    return null;
+}
+
 fn animate(actor: *c.ClutterActor, to: c.CaliRect) void {
     ease(actor);
     c.clutter_actor_set_position(actor, to.x, to.y);
@@ -222,10 +297,40 @@ fn animate(actor: *c.ClutterActor, to: c.CaliRect) void {
 
 // ---- Input while open -------------------------------------------------------------
 
-fn onCloneClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv(.C) c.gboolean {
-    const index = @intFromPtr(data) - 1;
-    if (index < n_entries) close(entries[index].window);
+fn onItemClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, item: c.gpointer) callconv(.C) c.gboolean {
+    if (entryIndex(item)) |i| close(entries[i].window);
     return 1; // handled
+}
+
+/// Closes the window (the app may still ask first) and closes the gap.
+fn onCloseClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, item: c.gpointer) callconv(.C) c.gboolean {
+    if (state != .open) return 1;
+    const i = entryIndex(item) orelse return 1;
+    const d = display orelse return 1;
+    c.meta_window_delete(entries[i].window, c.meta_display_get_current_time_roundtrip(d));
+    c.clutter_actor_destroy(entries[i].item);
+    std.mem.copyForwards(Entry, entries[i .. n_entries - 1], entries[i + 1 .. n_entries]);
+    n_entries -= 1;
+    relayout();
+    return 1;
+}
+
+fn onItemEnter(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, button: c.gpointer) callconv(.C) c.gboolean {
+    fade(@ptrCast(@alignCast(button)), 255);
+    return 0;
+}
+
+fn onItemLeave(item: ?*c.ClutterActor, event: ?*c.ClutterEvent, button: c.gpointer) callconv(.C) c.gboolean {
+    // Moving onto the close button (a child) isn't leaving the card.
+    const to = c.clutter_event_get_related(event);
+    if (to != null and c.clutter_actor_contains(item, to) != 0) return 0;
+    fade(@ptrCast(@alignCast(button)), 0);
+    return 0;
+}
+
+/// Leaves the overview, switching to `window` if given (used by the dock).
+pub fn closeTo(window: ?*c.MetaWindow) void {
+    close(window);
 }
 
 fn onEmptyClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
@@ -260,10 +365,13 @@ fn close(target: ?*c.MetaWindow) void {
 
     for (entries[0..n_entries]) |entry| {
         if (target != null and entry.window == target.?) {
-            c.clutter_actor_set_child_above_sibling(group, entry.clone, null);
+            c.clutter_actor_set_child_above_sibling(group, entry.item, null);
         }
-        animate(entry.clone, entry.from);
+        c.clutter_actor_hide(entry.title);
+        c.clutter_actor_hide(entry.close_button);
+        animate(entry.item, entry.from);
     }
+    dock.hide();
 
     ease(dim);
     c.clutter_actor_set_opacity(dim, 0);
@@ -299,6 +407,7 @@ fn finishClose() void {
     if (group) |g| c.clutter_actor_destroy(g);
     group = null;
     dim = null;
+    dock.clear();
     n_entries = 0;
     state = .closed;
     std.log.debug("overview: closed", .{});
