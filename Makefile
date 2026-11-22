@@ -13,7 +13,7 @@ PODMAN       ?= podman
 DEV_IMAGE    ?= localhost/calide-dev:fedora45
 
 .PHONY: all shell compositor compositor-sookie services sookie sookie-fetch \
-        test run smoke-sookie container-image container clean
+        test run smoke-sookie container-image container devkit clean
 
 all: compositor services
 
@@ -65,14 +65,33 @@ container-image:
 # Inside Fedora 45: install the latest Sookie over /, build everything with
 # Sookie and run the headless smoke test. Uses separate output folders so
 # host builds aren't mixed with container builds.
-container: container-image
-	$(PODMAN) run --rm -v $(CURDIR):/src:Z \
+CONTAINER_RUN = $(PODMAN) run --rm -v $(CURDIR):/src:Z \
 	  -e CARGO_TARGET_DIR=/src/out/container/target \
-	  -e ZIG_LOCAL_CACHE_DIR=/src/out/container/zig-cache \
-	  $(DEV_IMAGE) bash -c '\
-	    set -e; \
-	    curl -fL --retry 3 $(SOOKIE_URL) | tar -C / -xJ; \
+	  -e ZIG_LOCAL_CACHE_DIR=/src/out/container/zig-cache
+
+container: container-image
+	$(CONTAINER_RUN) $(DEV_IMAGE) bash -c '\
+	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) OUT=out/container/bin compositor-sookie-container services smoke-sookie-container'
+
+# Open Cali in a window on your desktop (Sookie's devkit) and start an app
+# inside it. Close the window or press Ctrl+C to stop.
+# Pick the app with CALI_APP=..., e.g. `make devkit CALI_APP=gnome-text-editor`.
+HOST_WAYLAND := $(if $(filter /%,$(WAYLAND_DISPLAY)),$(WAYLAND_DISPLAY),$(XDG_RUNTIME_DIR)/$(WAYLAND_DISPLAY))
+CALI_APP     ?= gnome-text-editor
+PODMAN_TTY   ?= -it
+
+devkit: container-image
+	@test -S "$(HOST_WAYLAND)" || { echo "devkit: run this from a Wayland session"; exit 1; }
+	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
+	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
+	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
+	  -e CALI_APP=$(CALI_APP) \
+	  $(DEV_IMAGE) bash -c '\
+	    set -e; scripts/container-sookie.sh; \
+	    make JOBS=$(JOBS) compositor-sookie-container; \
+	    trap "trap - TERM INT; kill -TERM 0" TERM INT; \
+	    scripts/devkit.sh out/container/bin/cali-compositor & wait $$!'
 
 # Container-only helpers: same as above, with container output folders.
 compositor-sookie-container:

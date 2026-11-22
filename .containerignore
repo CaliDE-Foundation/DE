@@ -1,0 +1,3 @@
+# Only the dependency script goes into the dev image.
+*
+!scripts/fedora-deps.sh

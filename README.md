@@ -97,7 +97,14 @@ so you don't have to compile it yourself.
 make sookie-fetch        # download the latest Sookie into out/sookie/root
 make compositor-sookie   # link cali-compositor against it (needs Sookie's libraries)
 make container           # any distro: build and test it all in Fedora 45 with podman
+make devkit              # open Cali in a window on your desktop, with an app inside
 ```
+
+<p align="center"><img src=".github/assets/devkit.png" width="560" alt="Cali running nested in a window, with GNOME Text Editor open inside"></p>
+
+`make devkit` runs Cali nested in a window on your current Wayland desktop, using
+Sookie's development kit and your GPU. It starts `gnome-text-editor` inside the session.
+Pick another app with `make devkit CALI_APP=...`, and close the window or press Ctrl+C to stop.
 
 `make container` installs the nightly Sookie inside a Fedora 45 container, builds
 everything against it, then starts Cali headless for a few seconds to check that it runs.
@@ -112,7 +119,7 @@ Download the `calide-x86_64` artifact from any run.
 - [x] Project layout: Zig compositor, Rust shell, Go services
 - [x] Zig ↔ Rust C ABI working
 - [x] `cali-compositor` starts Sookie (headless, tested in CI)
-- [ ] Nested Wayland session in a window (`--devkit`)
+- [x] Nested Wayland session in a window (`make devkit`)
 - [ ] Shell basics at GNOME parity: top bar, Activities overview, app grid
 - [ ] `cali-settingsd` on D-Bus, `calictl get/set`
 - [ ] The customization layer, the reason Cali exists

@@ -25,3 +25,13 @@ ln -sf /opt/zig/zig /usr/local/bin/zig
 
 dnf clean all
 zig version
+
+# Desktop pieces for `make devkit`: the devkit window (GTK4, libadwaita),
+# PipeWire for its picture, Mesa for rendering and a test app.
+if [ "${1:-}" = "--desktop" ]; then
+  dnf install -y --setopt=install_weak_deps=False \
+    gtk4 libadwaita libei pipewire wireplumber \
+    mesa-dri-drivers mesa-libEGL mesa-vulkan-drivers \
+    adwaita-sans-fonts adwaita-icon-theme gnome-text-editor
+  dnf clean all
+fi
