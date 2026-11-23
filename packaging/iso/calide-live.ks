@@ -33,6 +33,10 @@ kernel
 kernel-modules
 dracut-live
 dracut-config-generic
+# checkisomd5 for the "Test this media" boot entry (the GRUB default); dracut
+# only puts it in the initramfs when it's installed, and without it the check
+# fails at once and the boot halts.
+isomd5sum
 livesys-scripts
 anaconda-live
 @anaconda-tools
