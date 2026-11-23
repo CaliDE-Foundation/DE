@@ -120,6 +120,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     background_group = group;
 
     session.init();
+    session.startHelpers();
     ui.init(stage);
     createPanel(stage);
     overview.init(d, stage, panel);

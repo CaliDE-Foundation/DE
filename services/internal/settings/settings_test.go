@@ -139,3 +139,29 @@ func TestGSettingsValue(t *testing.T) {
 		t.Error("accent-color is Cali-only")
 	}
 }
+
+func TestSystemDefaultsAndExport(t *testing.T) {
+	dir := t.TempDir()
+	sys := filepath.Join(dir, "system.toml")
+	if err := os.WriteFile(sys, []byte("panel-height = 40\ndock-icon-size = 64\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(filepath.Join(dir, "user.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.LoadDefaults(sys)
+	if v, _ := st.Get("panel-height"); v != 40.0 {
+		t.Errorf("system default not used: %v", v)
+	}
+	if _, err := st.Set("panel-height", 36.0); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := st.Get("panel-height"); v != 36.0 {
+		t.Errorf("user value should win: %v", v)
+	}
+	got := ParseText(st.Export())
+	if got["panel-height"] != 36.0 || got["dock-icon-size"] != 64.0 {
+		t.Errorf("export should hold the whole setup, got %v", got)
+	}
+}

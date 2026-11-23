@@ -272,34 +272,77 @@ func Format(value any) string {
 
 // Store holds the current settings and their file.
 type Store struct {
-	mu     sync.Mutex
-	path   string
-	values map[string]any
+	mu       sync.Mutex
+	path     string
+	values   map[string]any
+	defaults map[string]any // system-wide defaults (/etc/xdg/cali/cali.toml)
 }
 
 // Open loads path (a missing file means all defaults). Unknown or invalid
 // entries are skipped so a bad line never breaks the desktop.
 func Open(path string) (*Store, error) {
-	st := &Store{path: path, values: map[string]any{}}
-	f, err := os.Open(path)
+	values, err := ReadFile(path)
 	if os.IsNotExist(err) {
-		return st, nil
+		err = nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
+	return &Store{path: path, values: values, defaults: map[string]any{}}, nil
+}
+
+// ReadFile parses a settings file, skipping unknown or invalid entries.
+func ReadFile(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{}, err
+	}
+	return ParseText(string(data)), nil
+}
+
+// ParseText parses settings in the file format, skipping unknown or invalid
+// entries so a bad line never breaks the desktop.
+func ParseText(text string) map[string]any {
+	values := map[string]any{}
+	sc := bufio.NewScanner(strings.NewReader(text))
 	for sc.Scan() {
 		key, value, ok := parseLine(sc.Text())
 		if !ok {
 			continue
 		}
 		if v, err := Validate(key, value); err == nil {
-			st.values[key] = v
+			values[key] = v
 		}
 	}
-	return st, sc.Err()
+	return values
+}
+
+// LoadDefaults reads system-wide defaults that replace the built-in ones,
+// most important file first (the order of XDG_CONFIG_DIRS). Missing files
+// are fine.
+func (st *Store) LoadDefaults(paths ...string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for i := len(paths) - 1; i >= 0; i-- {
+		values, _ := ReadFile(paths[i])
+		for k, v := range values {
+			st.defaults[k] = v
+		}
+	}
+}
+
+// Export writes every setting that differs from the built-in defaults, in
+// the settings file format, so a whole setup can be shared or restored.
+func (st *Store) Export() string {
+	var b strings.Builder
+	b.WriteString("# Cali setup, exported by Cali Settings. Import it in Cali Settings or with `calictl import`.\n")
+	for _, k := range Keys() {
+		v, _ := st.Get(k)
+		if fmt.Sprint(v) != fmt.Sprint(Schema[k].Default) {
+			fmt.Fprintf(&b, "%s = %s\n", k, encode(v))
+		}
+	}
+	return b.String()
 }
 
 // Get returns key's value, or its default.
@@ -307,6 +350,9 @@ func (st *Store) Get(key string) (any, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if v, ok := st.values[key]; ok {
+		return v, true
+	}
+	if v, ok := st.defaults[key]; ok {
 		return v, true
 	}
 	s, ok := Schema[key]

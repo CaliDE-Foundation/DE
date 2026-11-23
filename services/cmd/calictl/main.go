@@ -18,6 +18,8 @@ commands:
   get KEY            print one setting
   set KEY VALUE      change a setting (lists: comma-separated)
   reset KEY          go back to the default
+  export [FILE]      save your whole setup (stdout without FILE)
+  import FILE        load a setup; settings it leaves out go back to defaults
   version            print the version
   config-path        print the settings file location
 
@@ -124,6 +126,37 @@ func main() {
 		if err := fileStore().Reset(args[0]); err != nil {
 			fail("%v", err)
 		}
+	case "export":
+		var text string
+		if obj := settingsd(); obj != nil {
+			if err := obj.Call("org.calide.Settings.Export", 0).Store(&text); err != nil {
+				fail("%v", err)
+			}
+		} else {
+			text = fileStore().Export()
+		}
+		if len(args) == 0 {
+			fmt.Print(text)
+		} else if err := os.WriteFile(args[0], []byte(text), 0o644); err != nil {
+			fail("%v", err)
+		}
+	case "import":
+		if len(args) != 1 {
+			fail("usage: calictl import FILE")
+		}
+		data, err := os.ReadFile(args[0])
+		if err != nil {
+			fail("%v", err)
+		}
+		obj := settingsd()
+		if obj == nil {
+			fail("Cali isn't running; start it and try again")
+		}
+		var n uint32
+		if err := obj.Call("org.calide.Settings.Import", 0, string(data)).Store(&n); err != nil {
+			fail("%v", err)
+		}
+		fmt.Printf("imported %d settings\n", n)
 	default:
 		fmt.Fprintf(os.Stderr, "calictl: unknown command %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)

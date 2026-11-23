@@ -18,7 +18,7 @@ jobs:
 
     steps:
       # Sookie is built in its own repo, so the submodule isn't needed here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -29,7 +29,7 @@ jobs:
           version: 0.13.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: services/go.mod
 
@@ -43,7 +43,7 @@ jobs:
         run: make run
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: calide-x86_64
           path: out/bin/
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: scripts/fedora-deps.sh
@@ -80,7 +80,7 @@ jobs:
           make settings-app
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: calide-sookie-fedora45-x86_64
           path: out/bin/

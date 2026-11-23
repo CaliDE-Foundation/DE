@@ -5,10 +5,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/godbus/dbus/v5"
@@ -31,6 +33,8 @@ const introspection = `<node>
     <method name="Get"><arg direction="in" type="s" name="key"/><arg direction="out" type="v"/></method>
     <method name="Set"><arg direction="in" type="s" name="key"/><arg direction="in" type="v" name="value"/></method>
     <method name="Reset"><arg direction="in" type="s" name="key"/></method>
+    <method name="Export"><arg direction="out" type="s" name="setup"/></method>
+    <method name="Import"><arg direction="in" type="s" name="setup"/><arg direction="out" type="u" name="applied"/></method>
     <signal name="Changed"><arg type="s" name="key"/><arg type="v" name="value"/></signal>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
@@ -83,6 +87,33 @@ func (s *server) Reset(key string) *dbus.Error {
 	return nil
 }
 
+// Export returns the whole setup (every changed setting) as text.
+func (s *server) Export() (string, *dbus.Error) {
+	return s.store.Export(), nil
+}
+
+// Import replaces the setup: settings in the text are set, every other one
+// goes back to its default. Returns how many settings it read.
+func (s *server) Import(text string) (uint32, *dbus.Error) {
+	values := settings.ParseText(text)
+	for _, k := range settings.Keys() {
+		old, _ := s.store.Get(k)
+		var err error
+		if v, ok := values[k]; ok {
+			_, err = s.store.Set(k, v)
+		} else {
+			err = s.store.Reset(k)
+		}
+		if err != nil {
+			return 0, dbusErr(err)
+		}
+		if now, _ := s.store.Get(k); fmt.Sprint(now) != fmt.Sprint(old) {
+			s.changed(k)
+		}
+	}
+	return uint32(len(values)), nil
+}
+
 func (s *server) changed(key string) {
 	v, _ := s.store.Get(key)
 	applyGNOME(key, v)
@@ -119,6 +150,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("cali-settingsd: reading %s: %v", file, err)
 	}
+	store.LoadDefaults(systemDefaults()...)
 
 	conn, err := dbus.ConnectSessionBus()
 	if err != nil {
@@ -150,4 +182,20 @@ func main() {
 	case <-stop:
 	case <-conn.Context().Done():
 	}
+}
+
+// systemDefaults lists cali/cali.toml in each XDG_CONFIG_DIRS entry
+// (default /etc/xdg), where distributions put their own defaults.
+func systemDefaults() []string {
+	dirs := os.Getenv("XDG_CONFIG_DIRS")
+	if dirs == "" {
+		dirs = "/etc/xdg"
+	}
+	var out []string
+	for _, d := range filepath.SplitList(dirs) {
+		if d != "" {
+			out = append(out, filepath.Join(d, "cali", "cali.toml"))
+		}
+	}
+	return out
 }

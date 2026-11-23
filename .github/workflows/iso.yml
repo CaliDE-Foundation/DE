@@ -1,0 +1,138 @@
+name: Live ISO
+
+# Builds Fedora 45 RPMs of Sookie and Cali, then a live ISO that boots into
+# Cali (packaging/iso/calide-live.ks). Runs by hand and once a week; the ISO
+# lands in the rolling "live" release:
+# https://github.com/CaliDE-Foundation/DE/releases/tag/live
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 2"
+
+concurrency:
+  group: iso
+  cancel-in-progress: true
+
+jobs:
+  rpms:
+    name: RPMs (Fedora 45)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 120
+    steps:
+      - name: Install tools
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            'dnf-command(builddep)' rpm-build rpmdevtools createrepo_c git tar xz
+          dnf builddep -y --setopt=install_weak_deps=False mutter
+
+      - name: Check out Cali
+        uses: actions/checkout@v7.0.1
+        with:
+          path: calide
+
+      - name: Check out Sookie
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: CaliDE-Foundation/Sookie
+          path: sookie
+
+      - name: Build the sookie RPM
+        run: |
+          rpmdev-setuptree
+          commit=$(git -C sookie rev-parse --short HEAD)
+          git -C sookie archive --prefix=sookie/ -o ~/rpmbuild/SOURCES/sookie.tar.gz HEAD
+          rpmbuild -bb --define "commit $commit" sookie/packaging/fedora/sookie.spec
+          dnf install -y ~/rpmbuild/RPMS/x86_64/sookie-*.rpm
+
+      - name: Build the calide RPM
+        run: |
+          calide/scripts/fedora-deps.sh
+          dnf install -y --setopt=install_weak_deps=False gtk4-devel libadwaita-devel
+          commit=$(git -C calide rev-parse --short HEAD)
+          git -C calide archive --prefix=calide/ -o ~/rpmbuild/SOURCES/calide.tar.gz HEAD
+          rpmbuild -bb --define "commit $commit" calide/packaging/fedora/calide.spec
+
+      - name: Check the packages install together with GNOME
+        run: dnf install -y ~/rpmbuild/RPMS/x86_64/*.rpm gdm --setopt=install_weak_deps=False
+
+      - name: Make the repository
+        run: |
+          mkdir -p cali-repo
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm cali-repo/
+          createrepo_c cali-repo
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: cali-repo-fedora45
+          path: cali-repo/
+          retention-days: 14
+
+  iso:
+    name: Live ISO
+    needs: rpms
+    runs-on: ubuntu-latest
+    container:
+      image: registry.fedoraproject.org/fedora:45
+      options: --privileged
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: cali-repo-fedora45
+          path: /cali-repo
+
+      - name: Install livemedia-creator
+        run: dnf install -y lorax lorax-lmc-novirt pykickstart anaconda-install-env-deps gh
+
+      - name: Build the ISO
+        run: |
+          ksflatten -c packaging/iso/calide-live.ks -o /tmp/calide-live.ks
+          livemedia-creator --ks /tmp/calide-live.ks --no-virt --make-iso \
+            --resultdir /tmp/result --project CaliDE --releasever 45 \
+            --volid CaliDE-Live-45 --iso-only --iso-name calide-live-x86_64.iso \
+            --logfile /tmp/lmc.log
+          ls -lh /tmp/result
+          cd /tmp/result && sha256sum calide-live-x86_64.iso > calide-live-x86_64.iso.sha256
+
+      - name: Upload the ISO
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: calide-live-x86_64
+          path: /tmp/result/calide-live-x86_64.iso*
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: lmc-logs
+          path: |
+            /tmp/lmc.log
+            /tmp/*.log
+            ./*.log
+          retention-days: 7
+
+      - name: Publish to the "live" release
+        run: |
+          git config --global --add safe.directory "$PWD"
+          if gh release view live -R "$REPO" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/live" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh release create live -R "$REPO" --prerelease --target "$GITHUB_SHA" \
+              --title "CaliDE live ISO" --notes "pending"
+          fi
+          gh release upload live -R "$REPO" --clobber \
+            /tmp/result/calide-live-x86_64.iso /tmp/result/calide-live-x86_64.iso.sha256
+          gh release edit live -R "$REPO" --notes "$(printf '%s\n\n%s\n\n%s' \
+            "Fedora 45 live ISO with Cali, built from ${GITHUB_SHA}." \
+            "Write it to a USB stick (Fedora Media Writer, or dd), boot it, and you're in Cali. \"Install to Hard Drive\" is in the dock." \
+            "Untested builds: expect rough edges.")"
