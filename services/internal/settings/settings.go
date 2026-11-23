@@ -80,6 +80,20 @@ const (
 
 func quoted(v any) string { return "'" + fmt.Sprint(v) + "'" }
 
+// gnomeAccent gives apps (libadwaita reads org.gnome.desktop.interface
+// accent-color) the GNOME accent nearest to Cali's: GNOME has no coral, so
+// coral becomes orange; a custom color falls back to GNOME's blue.
+func gnomeAccent(v any) string {
+	switch s := fmt.Sprint(v); s {
+	case "coral":
+		return "'orange'"
+	case "custom":
+		return "'blue'"
+	default:
+		return quoted(s)
+	}
+}
+
 // shortcut is a key-* setting. With a GNOME key name it also sets
 // org.gnome.desktop.wm.keybindings (which takes a list of accelerators).
 func shortcut(def, title, group, wmKey string) Setting {
@@ -98,9 +112,10 @@ func shortcut(def, title, group, wmKey string) Setting {
 // Schema lists every setting.
 var Schema = map[string]Setting{
 	// ---- Appearance
-	"accent-color": choice("coral", AccentColors,
+	"accent-color": gnome(choice("coral", AccentColors,
 		[]string{"Coral", "Blue", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Slate", "Custom"},
 		"Accent Color", "Appearance", "Style", "Highlights, toggles and today in the calendar", false),
+		iface, "accent-color", gnomeAccent),
 	"accent-custom": {Kind: String, Default: "#e2725b", Title: "Custom Accent", Page: "Appearance", Group: "Colors",
 		Help: "A hex color like #3584e4, used when Accent Color is Custom", Advanced: true},
 	"surface-color": choice("charcoal", []string{"charcoal", "black", "slate", "plum", "forest", "mocha", "custom"},

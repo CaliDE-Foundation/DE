@@ -135,8 +135,10 @@ func TestGSettingsValue(t *testing.T) {
 	if _, _, v, ok := GSettingsValue("edge-tiling", false); !ok || v != "false" {
 		t.Errorf("edge-tiling: %s %v", v, ok)
 	}
-	if _, _, _, ok := GSettingsValue("accent-color", "blue"); ok {
-		t.Error("accent-color is Cali-only")
+	for cali, want := range map[string]string{"coral": "'orange'", "teal": "'teal'", "custom": "'blue'"} {
+		if s, k, v, ok := GSettingsValue("accent-color", cali); !ok || s != "org.gnome.desktop.interface" || k != "accent-color" || v != want {
+			t.Errorf("accent-color %s: %s %s %s %v", cali, s, k, v, ok)
+		}
 	}
 }
 
