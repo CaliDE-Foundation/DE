@@ -50,6 +50,52 @@ fn sessionTargetStarted(_: ?*c.GObject, result: ?*c.GAsyncResult, _: c.gpointer)
     } else std.log.warn("session: couldn't start cali-session.target; portals won't run", .{});
 }
 
+// ---- GDM registration ----------------------------------------------------------------
+
+/// cali.desktop says X-GDM-SessionRegisters=true, like GNOME's session, so
+/// GDM waits for Cali instead of guessing: once the first frame is on screen
+/// we register the session and display. GDM then quits the boot splash with
+/// a smooth handover. Without this, gdm-wayland-session registers after a
+/// fixed 10 seconds and the splash quits mid-session; on the live ISO GDM
+/// then put its login screen on VT1 over the running autologin session.
+/// Under other display managers the calls just fail (logged at debug).
+pub fn registerWithGdm(stage: ?*c.ClutterStage) void {
+    if (c.g_getenv("XDG_SESSION_ID") == null) return; // devkit: no login session
+    gdm_paint_handler = c.g_signal_connect_data(@ptrCast(stage), "after-paint", @ptrCast(&firstPaint), null, null, 0);
+}
+
+var gdm_paint_handler: c.gulong = 0;
+
+fn firstPaint(stage: ?*c.ClutterStage, _: c.gpointer) callconv(.C) void {
+    c.g_signal_handler_disconnect(@ptrCast(stage), gdm_paint_handler);
+    gdm_paint_handler = 0;
+    var err: ?*c.GError = null;
+    const system = c.g_bus_get_sync(@intCast(c.G_BUS_TYPE_SYSTEM), null, @ptrCast(&err));
+    if (err) |e| {
+        std.log.debug("session: no system bus, not registering with GDM: {s}", .{e.message});
+        c.g_error_free(e);
+        return;
+    }
+    // Session first, then display; GDM handles them in order on one connection.
+    for ([_][*:0]const u8{ "RegisterSession", "RegisterDisplay" }) |method| {
+        c.g_dbus_connection_call(system, "org.gnome.DisplayManager", "/org/gnome/DisplayManager/Manager", "org.gnome.DisplayManager.Manager", method, null, null, @intCast(c.G_DBUS_CALL_FLAGS_NO_AUTO_START), 5000, null, &gdmRegistered, @constCast(@ptrCast(method)));
+    }
+    c.g_object_unref(system);
+}
+
+fn gdmRegistered(source: ?*c.GObject, result: ?*c.GAsyncResult, data: c.gpointer) callconv(.C) void {
+    const method: [*:0]const u8 = @ptrCast(data);
+    var err: ?*c.GError = null;
+    const reply = c.g_dbus_connection_call_finish(@ptrCast(source), result, @ptrCast(&err));
+    if (err) |e| {
+        std.log.debug("session: GDM {s} failed (not a GDM login?): {s}", .{ method, e.message });
+        c.g_error_free(e);
+        return;
+    }
+    c.g_variant_unref(reply);
+    std.log.info("session: {s} with GDM", .{method});
+}
+
 // ---- Login session helpers -----------------------------------------------------------
 
 /// In a real login (not the devkit), start what gnome-session would: the

@@ -122,6 +122,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
 
     session.init();
     session.startHelpers();
+    session.registerWithGdm(@ptrCast(stage));
     @import("a11y.zig").init(d);
     ui.init(stage);
     createPanel(stage);

@@ -5,3 +5,4 @@ Exec=cali-session
 TryExec=cali-session
 Type=Application
 DesktopNames=Cali
+X-GDM-SessionRegisters=true
