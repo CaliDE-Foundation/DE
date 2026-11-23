@@ -147,6 +147,10 @@ fn applyConfig(key: []const u8, value: ?*c.GVariant) bool {
     }
     if (is(value, "s")) {
         const text = std.mem.span(c.g_variant_get_string(value, null));
+        if (std.mem.startsWith(u8, key, "key-")) {
+            _ = @import("keys.zig").settingChanged(key, text);
+            return false; // nothing to restyle
+        }
         for (color_keys, 0..) |name, i| {
             if (!eql(u8, key, name)) continue;
             const n = @min(text.len, 31);

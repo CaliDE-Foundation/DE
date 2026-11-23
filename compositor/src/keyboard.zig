@@ -18,7 +18,7 @@ var action_next: c_uint = 0;
 
 pub fn init(d: ?*c.MetaDisplay) void {
     display = d;
-    action_next = c.meta_display_grab_accelerator(d, "<Super>space", @intCast(c.META_KEY_BINDING_NONE));
+    @import("keys.zig").bind(d, "key-next-layout", "<Super>space", &action_next);
     plugin.connect(d, "accelerator-activated", &onAccelerator, null);
 }
 

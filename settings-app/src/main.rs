@@ -17,21 +17,22 @@ mod extensions;
 const APP_ID: &str = "org.calide.Settings";
 
 /// Pages in order, with their icons.
-const PAGES: [(&str, &str); 7] = [
+const PAGES: [(&str, &str); 8] = [
     ("Appearance", "applications-graphics-symbolic"),
     ("Top Bar", "view-continuous-symbolic"),
     ("Overview", "view-app-grid-symbolic"),
     ("Windows", "window-new-symbolic"),
     ("Tiling", "view-grid-symbolic"),
     ("Behavior", "preferences-system-symbolic"),
+    ("Shortcuts", "preferences-desktop-keyboard-shortcuts-symbolic"),
     ("Accessibility", "preferences-desktop-accessibility-symbolic"),
 ];
 
 /// Groups in the order they appear on their page.
-const GROUP_ORDER: [&str; 25] = [
+const GROUP_ORDER: [&str; 26] = [
     "Style", "Colors", "Background", "Bar", "Clock", "Indicators", "Overview", "App Grid", "Dock", "Calendar",
     "Animations", "Behavior", "Rules", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Notifications",
-    "Screen", "Keyboard", "Seeing", "Hearing", "Typing", "Pointing",
+    "Screen", "Keyboard", "Shell", "Seeing", "Hearing", "Typing", "Pointing",
 ];
 
 /// Built-in wallpapers: (setting value, label).
@@ -241,6 +242,9 @@ fn build_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) -> g
     }
     if e.key == "window-rules" {
         return rules_row(settings, e, value).upcast();
+    }
+    if e.key.starts_with("key-") {
+        return shortcut_row(settings, e, value).upcast();
     }
     let key = e.key.clone();
     let settings = settings.clone();
@@ -477,5 +481,56 @@ fn rules_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) -> a
     if let Some(f) = redraw.borrow().as_ref() {
         f()
     }
+    row
+}
+
+/// A shortcut: shows the keys; clicking it asks for new ones.
+fn shortcut_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) -> adw::ActionRow {
+    let row = adw::ActionRow::builder().title(e.title.as_str()).activatable(true).build();
+    let accel = value.and_then(|v| v.get::<String>()).unwrap_or_default();
+    let label = gtk::ShortcutLabel::builder().accelerator(accel.as_str()).disabled_text("Off").valign(gtk::Align::Center).build();
+    row.add_suffix(&label);
+    let settings = settings.clone();
+    let key = e.key.clone();
+    let title = e.title.clone();
+    row.connect_activated(move |row| {
+        let dialog = adw::AlertDialog::builder()
+            .heading(format!("Set Shortcut for \u{201c}{title}\u{201d}").as_str())
+            .body("Press the new keys. Backspace turns it off, Esc cancels.")
+            .build();
+        dialog.add_response("cancel", "Cancel");
+        let keys = gtk::EventControllerKey::new();
+        {
+            let dialog = dialog.clone();
+            let settings = settings.clone();
+            let key = key.clone();
+            let label = label.clone();
+            keys.connect_key_pressed(move |_, keyval, _, state| {
+                use gtk::gdk::Key;
+                let mods = state & gtk::accelerator_get_default_mod_mask();
+                if keyval == Key::Escape && mods.is_empty() {
+                    dialog.close();
+                    return glib::Propagation::Stop;
+                }
+                if keyval == Key::BackSpace && mods.is_empty() {
+                    settings.set(&key, "".to_variant());
+                    label.set_accelerator("");
+                    dialog.close();
+                    return glib::Propagation::Stop;
+                }
+                // Wait for a real key, not just a modifier.
+                if matches!(keyval, Key::Shift_L | Key::Shift_R | Key::Control_L | Key::Control_R | Key::Alt_L | Key::Alt_R | Key::Super_L | Key::Super_R | Key::Meta_L | Key::Meta_R) {
+                    return glib::Propagation::Stop;
+                }
+                let name = gtk::accelerator_name(keyval.to_lower(), mods).to_string();
+                settings.set(&key, name.to_variant());
+                label.set_accelerator(&name);
+                dialog.close();
+                glib::Propagation::Stop
+            });
+        }
+        dialog.add_controller(keys);
+        dialog.present(row.root().as_ref());
+    });
     row
 }

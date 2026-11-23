@@ -36,7 +36,7 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     display = d;
     stage = s;
     panel = p;
-    action_lock = c.meta_display_grab_accelerator(d, "<Super>l", @intCast(c.META_KEY_BINDING_NONE));
+    @import("keys.zig").bind(d, "key-lock", "<Super>l", &action_lock);
     plugin.connect(d, "accelerator-activated", &onAccelerator, null);
     setIdle(idle_minutes, lock_on_idle);
 

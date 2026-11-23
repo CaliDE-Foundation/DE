@@ -21,7 +21,7 @@ var handlers_installed = false;
 
 pub fn init(d: ?*c.MetaDisplay) void {
     display = d;
-    action_toggle = c.meta_display_grab_accelerator(d, "<Super>t", @intCast(c.META_KEY_BINDING_NONE));
+    @import("keys.zig").bind(d, "key-tile-float", "<Super>t", &action_toggle);
     plugin.connect(d, "accelerator-activated", &onAccelerator, null);
     plugin.connect(d, "window-created", &onWindowCreated, null);
     plugin.connect(d, "focus-window", &onFocus, null);

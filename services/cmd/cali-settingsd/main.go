@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/godbus/dbus/v5"
@@ -171,6 +172,11 @@ func main() {
 	}
 
 	for _, k := range settings.Keys() {
+		// Shortcuts that are GNOME's own keep GNOME's defaults (often several
+		// keys each) unless the user picked one.
+		if strings.HasPrefix(k, "key-") && !store.IsSet(k) {
+			continue
+		}
 		v, _ := store.Get(k)
 		applyGNOME(k, v)
 	}

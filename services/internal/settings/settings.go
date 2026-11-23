@@ -80,6 +80,21 @@ const (
 
 func quoted(v any) string { return "'" + fmt.Sprint(v) + "'" }
 
+// shortcut is a key-* setting. With a GNOME key name it also sets
+// org.gnome.desktop.wm.keybindings (which takes a list of accelerators).
+func shortcut(def, title, group, wmKey string) Setting {
+	st := Setting{Kind: String, Default: def, Title: title, Page: "Shortcuts", Group: group}
+	if wmKey != "" {
+		st = gnome(st, "org.gnome.desktop.wm.keybindings", wmKey, func(v any) string {
+			if fmt.Sprint(v) == "" {
+				return "[]"
+			}
+			return "['" + fmt.Sprint(v) + "']"
+		})
+	}
+	return st
+}
+
 // Schema lists every setting.
 var Schema = map[string]Setting{
 	// ---- Appearance
@@ -194,6 +209,27 @@ var Schema = map[string]Setting{
 	"bounce-keys":    gnome(b(false, "Bounce Keys", a11yPage, "Typing", "Ignore fast repeated presses of the same key", false), a11yKeys, "bouncekeys-enable", nil),
 	"mouse-keys":     gnome(b(false, "Mouse Keys", a11yPage, "Pointing", "Move the pointer with the number pad", false), a11yKeys, "mousekeys-enable", nil),
 	"focus-outlines": b(true, "Focus Outlines", a11yPage, "Typing", "Highlight what the keyboard is on in shell menus (Tab, arrows, Enter)", true),
+
+	// ---- Shortcuts (empty = off). Cali's own:
+	"key-quick-settings":    shortcut("<Super>s", "Quick Settings", "Shell", ""),
+	"key-calendar":          shortcut("<Super>v", "Date and Notifications", "Shell", ""),
+	"key-screen-reader":     shortcut("<Super><Alt>s", "Screen Reader On/Off", "Shell", ""),
+	"key-lock":              shortcut("<Super>l", "Lock Screen", "Shell", ""),
+	"key-screenshot":        shortcut("Print", "Screenshot", "Shell", ""),
+	"key-screenshot-window": shortcut("<Alt>Print", "Screenshot of a Window", "Shell", ""),
+	"key-next-layout":       shortcut("<Super>space", "Next Keyboard Layout", "Shell", ""),
+	"key-tile-float":        shortcut("<Super>t", "Tile or Float Window", "Windows", ""),
+	// ...and GNOME's window shortcuts, which Sookie handles.
+	"key-close-window":    shortcut("<Alt>F4", "Close Window", "Windows", "close"),
+	"key-maximize":        shortcut("<Super>Up", "Maximize or Restore", "Windows", "toggle-maximized"),
+	"key-minimize":        shortcut("<Super>h", "Minimize", "Windows", "minimize"),
+	"key-fullscreen":      shortcut("", "Fullscreen", "Windows", "toggle-fullscreen"),
+	"key-workspace-left":  shortcut("<Super>Page_Up", "Previous Workspace", "Workspaces", "switch-to-workspace-left"),
+	"key-workspace-right": shortcut("<Super>Page_Down", "Next Workspace", "Workspaces", "switch-to-workspace-right"),
+	"key-move-left":       shortcut("<Super><Shift>Page_Up", "Move Window to Previous Workspace", "Workspaces", "move-to-workspace-left"),
+	"key-move-right":      shortcut("<Super><Shift>Page_Down", "Move Window to Next Workspace", "Workspaces", "move-to-workspace-right"),
+	"key-switch-apps":     shortcut("<Alt>Tab", "Switch Apps", "Switching", "switch-applications"),
+	"key-switch-windows":  shortcut("", "Switch Windows", "Switching", "switch-windows"),
 
 	// ---- Behavior
 	"alt-tab-mode":              choice("apps", []string{"apps", "windows"}, []string{"Apps", "Windows"}, "Alt+Tab Switches", "Behavior", "Switching", "Between apps or between every window", false),
@@ -406,6 +442,14 @@ func (st *Store) Get(key string) (any, bool) {
 	}
 	s, ok := Schema[key]
 	return s.Default, ok
+}
+
+// IsSet reports whether the user (not a default) chose key's value.
+func (st *Store) IsSet(key string) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	_, ok := st.values[key]
+	return ok
 }
 
 // All returns every setting's current value.

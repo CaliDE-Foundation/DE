@@ -49,8 +49,8 @@ const introspection =
 pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor) void {
     display = d;
     stage = s;
-    action_screen = c.meta_display_grab_accelerator(d, "Print", @intCast(c.META_KEY_BINDING_NONE));
-    action_window = c.meta_display_grab_accelerator(d, "<Alt>Print", @intCast(c.META_KEY_BINDING_NONE));
+    @import("keys.zig").bind(d, "key-screenshot", "Print", &action_screen);
+    @import("keys.zig").bind(d, "key-screenshot-window", "<Alt>Print", &action_window);
     plugin.connect(d, "accelerator-activated", &onAccelerator, null);
 
     _ = c.g_bus_own_name(@intCast(c.G_BUS_TYPE_SESSION), "org.gnome.Shell.Screenshot", @intCast(c.G_BUS_NAME_OWNER_FLAGS_REPLACE), &onBusAcquired, null, null, null, null);

@@ -20,10 +20,10 @@ pub fn init(d: ?*c.MetaDisplay) void {
     // Like GNOME Shell: always expose the shell over AT-SPI, so a screen
     // reader started later can read it.
     if (c.atk_bridge_adaptor_init(null, null) != 0) std.log.warn("a11y: AT-SPI bridge unavailable", .{});
-    const none: c_uint = @intCast(c.META_KEY_BINDING_NONE);
-    action_reader = c.meta_display_grab_accelerator(d, "<Super><Alt>s", none);
-    action_calendar = c.meta_display_grab_accelerator(d, "<Super>v", none);
-    action_quick = c.meta_display_grab_accelerator(d, "<Super>s", none);
+    const keys = @import("keys.zig");
+    keys.bind(d, "key-screen-reader", "<Super><Alt>s", &action_reader);
+    keys.bind(d, "key-calendar", "<Super>v", &action_calendar);
+    keys.bind(d, "key-quick-settings", "<Super>s", &action_quick);
     plugin.connect(d, "accelerator-activated", &onAccelerator, null);
 }
 
