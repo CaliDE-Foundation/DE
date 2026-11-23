@@ -12,6 +12,8 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use serde::Deserialize;
 
+mod extensions;
+
 const APP_ID: &str = "org.calide.Settings";
 
 /// Pages in order, with their icons.
@@ -111,52 +113,81 @@ fn build_window(app: &adw::Application) {
         .default_height(780)
         .build();
 
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    toolbar.add_top_bar(&header);
-
-    match Settings::connect() {
-        Some((settings, schema, values)) => {
-            let stack = adw::ViewStack::new();
-            let advanced_rows: AdvancedRows = Rc::default();
-            for (page_name, icon) in PAGES {
-                let page = build_page(&settings, &schema, &values, page_name, &advanced_rows);
-                stack.add_titled_with_icon(&page, Some(page_name), page_name, icon);
-            }
-            let switcher = adw::ViewSwitcher::builder().stack(&stack).policy(adw::ViewSwitcherPolicy::Wide).build();
-            header.set_title_widget(Some(&switcher));
-
-            // Default shows the common settings; Advanced shows everything.
-            let advanced = gtk::ToggleButton::builder().label("Advanced").tooltip_text("Show every setting").build();
-            header.pack_end(&advanced);
-            let rows = advanced_rows.clone();
-            let apply = move |on: bool| {
-                for (row, _) in rows.borrow().iter() {
-                    row.set_visible(on);
-                }
-                for (_, group) in rows.borrow().iter() {
-                    group.set_visible(on || group_has_visible_rows(group));
-                }
-            };
-            apply(std::env::var("CALI_SETTINGS_ADVANCED").is_ok());
-            advanced.set_active(std::env::var("CALI_SETTINGS_ADVANCED").is_ok());
-            advanced.connect_toggled(move |b| apply(b.is_active()));
-            if let Ok(page) = std::env::var("CALI_SETTINGS_PAGE") {
-                if let Some((name, _)) = PAGES.iter().find(|(name, _)| name.eq_ignore_ascii_case(&page)) {
-                    stack.set_visible_child_name(name);
-                }
-            }
-            toolbar.set_content(Some(&stack));
-        }
-        None => toolbar.set_content(Some(
+    let Some((settings, schema, values)) = Settings::connect() else {
+        let toolbar = adw::ToolbarView::new();
+        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.set_content(Some(
             &adw::StatusPage::builder()
                 .icon_name("dialog-warning-symbolic")
                 .title("Cali Isn't Running")
                 .description("Cali Settings changes the Cali desktop. Start a Cali session, then try again.")
                 .build(),
-        )),
+        ));
+        window.set_content(Some(&toolbar));
+        window.present();
+        return;
+    };
+
+    // Like GNOME Settings: pages in a sidebar, the open page on the right.
+    let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
+    let advanced_rows: AdvancedRows = Rc::default();
+    let mut pages: Vec<(&str, &str)> = PAGES.to_vec();
+    for (name, _) in PAGES {
+        stack.add_named(&build_page(&settings, &schema, &values, name, &advanced_rows), Some(name));
     }
-    window.set_content(Some(&toolbar));
+    stack.add_named(&extensions::page(), Some("Extensions"));
+    pages.push(("Extensions", "application-x-addon-symbolic"));
+
+    let sidebar_list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
+    for (name, icon) in &pages {
+        let row_box = gtk::Box::builder().spacing(12).margin_top(6).margin_bottom(6).margin_start(6).build();
+        row_box.append(&gtk::Image::from_icon_name(icon));
+        row_box.append(&gtk::Label::builder().label(*name).xalign(0.0).build());
+        let row = gtk::ListBoxRow::builder().child(&row_box).name(*name).build();
+        sidebar_list.append(&row);
+    }
+    let content_title = adw::WindowTitle::new("", "");
+    {
+        let stack = stack.clone();
+        let content_title = content_title.clone();
+        sidebar_list.connect_row_selected(move |_, row| {
+            if let Some(row) = row {
+                stack.set_visible_child_name(&row.widget_name());
+                content_title.set_title(&row.widget_name());
+            }
+        });
+    }
+    let start = std::env::var("CALI_SETTINGS_PAGE").ok().and_then(|p| pages.iter().position(|(n, _)| n.eq_ignore_ascii_case(&p))).unwrap_or(0);
+    sidebar_list.select_row(sidebar_list.row_at_index(start as i32).as_ref());
+
+    let sidebar = adw::ToolbarView::new();
+    let sidebar_header = adw::HeaderBar::builder().title_widget(&adw::WindowTitle::new("Settings", "")).build();
+    sidebar_header.pack_end(&setup_menu(&window, &settings));
+    sidebar.add_top_bar(&sidebar_header);
+    sidebar.set_content(Some(&gtk::ScrolledWindow::builder().child(&sidebar_list).hscrollbar_policy(gtk::PolicyType::Never).build()));
+
+    // Default shows the common settings; Advanced shows everything.
+    let content = adw::ToolbarView::new();
+    let content_header = adw::HeaderBar::builder().title_widget(&content_title).build();
+    let advanced = gtk::ToggleButton::builder().label("Advanced").tooltip_text("Show every setting").build();
+    content_header.pack_end(&advanced);
+    content.add_top_bar(&content_header);
+    content.set_content(Some(&stack));
+    let rows = advanced_rows.clone();
+    let apply = move |on: bool| {
+        for (row, _) in rows.borrow().iter() {
+            row.set_visible(on);
+        }
+        for (_, group) in rows.borrow().iter() {
+            group.set_visible(on || group_has_visible_rows(group));
+        }
+    };
+    apply(std::env::var("CALI_SETTINGS_ADVANCED").is_ok());
+    advanced.set_active(std::env::var("CALI_SETTINGS_ADVANCED").is_ok());
+    advanced.connect_toggled(move |b| apply(b.is_active()));
+
+    let split = adw::OverlaySplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(220.0).build();
+    window.set_content(Some(&split));
     window.present();
 }
 
@@ -302,4 +333,55 @@ fn wallpaper_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) 
         }
     });
     combo
+}
+
+/// The ⋮ menu: save your whole setup to a file, or load one (to move it to
+/// another computer or share it).
+fn setup_menu(window: &adw::ApplicationWindow, settings: &Settings) -> gtk::MenuButton {
+    let menu = gio::Menu::new();
+    menu.append(Some("Export Setup\u{2026}"), Some("win.export-setup"));
+    menu.append(Some("Import Setup\u{2026}"), Some("win.import-setup"));
+    let button = gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).tooltip_text("Your Setup").build();
+
+    let export = gio::SimpleAction::new("export-setup", None);
+    {
+        let window = window.clone();
+        let settings = settings.clone();
+        export.connect_activate(move |_, _| {
+            let Ok(reply) = settings.proxy.call_sync("Export", None, gio::DBusCallFlags::NONE, 2000, None::<&gio::Cancellable>) else { return };
+            let text = reply.child_value(0).get::<String>().unwrap_or_default();
+            let dialog = gtk::FileDialog::builder().title("Export Setup").initial_name("my-cali-setup.toml").build();
+            dialog.save(Some(&window), None::<&gio::Cancellable>, move |result| {
+                if let Some(path) = result.ok().and_then(|f| f.path()) {
+                    if let Err(err) = std::fs::write(&path, &text) {
+                        eprintln!("cali-settings: {err}");
+                    }
+                }
+            });
+        });
+    }
+    let import = gio::SimpleAction::new("import-setup", None);
+    {
+        let window = window.clone();
+        let settings = settings.clone();
+        import.connect_activate(move |_, _| {
+            let dialog = gtk::FileDialog::builder().title("Import Setup").build();
+            let settings = settings.clone();
+            let window2 = window.clone();
+            dialog.open(Some(&window), None::<&gio::Cancellable>, move |result| {
+                let Some(path) = result.ok().and_then(|f| f.path()) else { return };
+                let Ok(text) = std::fs::read_to_string(&path) else { return };
+                if settings.proxy.call_sync("Import", Some(&(text,).to_variant()), gio::DBusCallFlags::NONE, 5000, None::<&gio::Cancellable>).is_ok() {
+                    // Rebuild the pages with the new values.
+                    if let Some(app) = window2.application().and_downcast::<adw::Application>() {
+                        window2.close();
+                        build_window(&app);
+                    }
+                }
+            });
+        });
+    }
+    window.add_action(&export);
+    window.add_action(&import);
+    button
 }
