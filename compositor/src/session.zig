@@ -35,6 +35,21 @@ pub fn init() void {
     bus.call("org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", "SetEnvironment", c.g_variant_new("(as)", list), null, null);
 }
 
+/// Starts cali-session.target (and with it graphical-session.target), which
+/// xdg-desktop-portal requires: without it apps get no dark style, file
+/// chooser or screen sharing. Sent after SetEnvironment on the same
+/// connection, so services see WAYLAND_DISPLAY. cali-session stops it.
+fn startSessionTarget() void {
+    bus.call("org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", "StartUnit", c.g_variant_new("(ss)", "cali-session.target", "replace"), &sessionTargetStarted, null);
+}
+
+fn sessionTargetStarted(_: ?*c.GObject, result: ?*c.GAsyncResult, _: c.gpointer) callconv(.C) void {
+    if (bus.finish(result)) |reply| {
+        c.g_variant_unref(reply);
+        std.log.info("session: started cali-session.target", .{});
+    } else std.log.warn("session: couldn't start cali-session.target; portals won't run", .{});
+}
+
 // ---- Login session helpers -----------------------------------------------------------
 
 /// In a real login (not the devkit), start what gnome-session would: the
@@ -43,6 +58,7 @@ pub fn startHelpers() void {
     // CALI_DEBUG_AUTOSTART runs them in the devkit too.
     const login = c.g_getenv("XDG_SESSION_ID") != null or c.g_getenv("CALI_DEBUG_AUTOSTART") != null;
     if (c.g_getenv("CALI_NO_AUTOSTART") != null or !login) return;
+    startSessionTarget();
     _ = c.g_idle_add(&runHelpers, null);
 }
 

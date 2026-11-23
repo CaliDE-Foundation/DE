@@ -1,0 +1,9 @@
+# Bound to a running Cali session. graphical-session.target can't be started
+# by hand, so Cali starts this instead once WAYLAND_DISPLAY is exported;
+# xdg-desktop-portal and other session services require it.
+[Unit]
+Description=Cali session
+Documentation=https://github.com/CaliDE-Foundation/DE
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target

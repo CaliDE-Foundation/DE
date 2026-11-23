@@ -119,6 +119,8 @@ PREFIX     ?= /usr/local
 SYSCONFDIR ?= /etc
 BINDIR     := $(DESTDIR)$(PREFIX)/bin
 DATADIR    := $(DESTDIR)$(PREFIX)/share
+# systemd also reads /usr/local/lib/systemd/user.
+USERUNITDIR := $(DESTDIR)$(PREFIX)/lib/systemd/user
 BINARIES   := cali-compositor cali-settingsd cali-statusd cali-notifyd cali-extd calictl
 
 install:
@@ -130,6 +132,7 @@ install:
 	install -Dm644 data/cali.desktop $(DATADIR)/wayland-sessions/cali.desktop
 	install -Dm644 data/10_calide.gschema.override $(DATADIR)/glib-2.0/schemas/10_calide.gschema.override
 	install -Dm644 data/cali-portals.conf $(DATADIR)/xdg-desktop-portal/cali-portals.conf
+	install -Dm644 data/cali-session.target $(USERUNITDIR)/cali-session.target
 	install -Dm644 data/pam/cali-lock $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock
 	install -Dm644 data/org.calide.Settings.desktop $(DATADIR)/applications/org.calide.Settings.desktop
 	install -Dm644 data/icons/org.calide.Settings.svg $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
@@ -140,7 +143,8 @@ install:
 uninstall:
 	for b in $(BINARIES) cali-settings cali-session; do rm -f $(BINDIR)/$$b; done
 	rm -f $(DATADIR)/wayland-sessions/cali.desktop $(DATADIR)/glib-2.0/schemas/10_calide.gschema.override \
-	  $(DATADIR)/xdg-desktop-portal/cali-portals.conf $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock \
+	  $(DATADIR)/xdg-desktop-portal/cali-portals.conf $(USERUNITDIR)/cali-session.target \
+	  $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock \
 	  $(DATADIR)/applications/org.calide.Settings.desktop $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
 	cd data/extensions && for f in $$(find . -type f); do rm -f $(DATADIR)/cali/extensions/$$f; done
 	-cd data/extensions && for d in $$(find . -mindepth 1 -type d); do rmdir $(DATADIR)/cali/extensions/$$d; done

@@ -22,5 +22,10 @@ fi
 
 # The compositor takes over the screen (KMS) through logind/elogind.
 # CALI_SESSION_ARGS replaces the arguments, e.g. for testing headless.
+# The compositor starts cali-session.target (graphical-session.target) once
+# Wayland is up; stop it when Cali exits so the next login starts clean.
 # shellcheck disable=SC2086
-exec cali-compositor ${CALI_SESSION_ARGS:---wayland --display-server} "$@"
+cali-compositor ${CALI_SESSION_ARGS:---wayland --display-server} "$@"
+status=$?
+systemctl --user stop cali-session.target 2>/dev/null
+exit $status

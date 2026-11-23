@@ -40,6 +40,7 @@ make install PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir} DESTDIR=%{buildroot}
 %{_datadir}/wayland-sessions/cali.desktop
 %{_datadir}/glib-2.0/schemas/10_calide.gschema.override
 %{_datadir}/xdg-desktop-portal/cali-portals.conf
+%{_userunitdir}/cali-session.target
 %{_datadir}/applications/org.calide.Settings.desktop
 %{_datadir}/icons/hicolor/scalable/apps/org.calide.Settings.svg
 %{_datadir}/cali/
