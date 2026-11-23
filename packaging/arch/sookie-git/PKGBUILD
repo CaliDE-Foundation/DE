@@ -7,10 +7,16 @@ pkgdesc="Wayland compositor and window manager for the Cali desktop (a fork of M
 arch=(x86_64)
 url="https://github.com/CaliDE-Foundation/Sookie"
 license=(GPL-2.0-or-later)
-depends=(colord glib2 graphene gsettings-desktop-schemas gtk4 lcms2 libadwaita libdisplay-info
-         libei libinput libsm libwacom libxkbcommon pipewire startup-notification
-         systemd-libs xorg-xwayland)
-makedepends=(git meson ninja gobject-introspection python wayland-protocols)
+# The same dependencies as Arch's mutter package.
+depends=(at-spi2-core cairo colord dconf egl-wayland fontconfig fribidi gdk-pixbuf2 glib2 glibc
+         glycin gnome-desktop-4 gnome-settings-daemon graphene gsettings-desktop-schemas gtk4
+         harfbuzz iio-sensor-proxy lcms2 libcanberra libcolord libdisplay-info libdrm libei libgcc
+         libgirepository libglvnd libgudev libinput libpipewire libsysprof-capture libwacom libx11
+         libxau libxcb libxcomposite libxcursor libxdamage libxext libxfixes libxi libxinerama
+         libxkbcommon libxrandr mesa pango pipewire pixman python python-argcomplete python-dbus
+         python-gobject startup-notification systemd-libs wayland xorg-xwayland)
+makedepends=(bash-completion git glib2-devel gobject-introspection meson python-docutils
+             sysprof wayland-protocols)
 provides=(sookie)
 conflicts=(sookie mutter)
 source=("git+https://github.com/CaliDE-Foundation/Sookie.git")
