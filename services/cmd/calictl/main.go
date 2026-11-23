@@ -104,10 +104,11 @@ func main() {
 		}
 		fmt.Println(settings.Format(get(args[0])))
 	case "set":
-		if len(args) != 2 {
+		if len(args) < 2 {
 			fail("usage: calictl set KEY VALUE")
 		}
-		value, err := settings.Parse(args[0], args[1])
+		// Words after the key form the value, so quotes are optional.
+		value, err := settings.Parse(args[0], strings.Join(args[1:], " "))
 		if err != nil {
 			fail("%v", err)
 		}

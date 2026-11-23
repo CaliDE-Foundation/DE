@@ -28,9 +28,9 @@ const PAGES: [(&str, &str); 7] = [
 ];
 
 /// Groups in the order they appear on their page.
-const GROUP_ORDER: [&str; 24] = [
+const GROUP_ORDER: [&str; 25] = [
     "Style", "Colors", "Background", "Bar", "Clock", "Indicators", "Overview", "App Grid", "Dock", "Calendar",
-    "Animations", "Behavior", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Notifications",
+    "Animations", "Behavior", "Rules", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Notifications",
     "Screen", "Keyboard", "Seeing", "Hearing", "Typing", "Pointing",
 ];
 
@@ -239,6 +239,9 @@ fn build_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) -> g
     if e.key == "wallpaper" {
         return wallpaper_row(settings, e, value).upcast();
     }
+    if e.key == "window-rules" {
+        return rules_row(settings, e, value).upcast();
+    }
     let key = e.key.clone();
     let settings = settings.clone();
     match e.kind.as_str() {
@@ -384,4 +387,95 @@ fn setup_menu(window: &adw::ApplicationWindow, settings: &Settings) -> gtk::Menu
     window.add_action(&export);
     window.add_action(&import);
     button
+}
+
+/// Window rules: one editable row per rule, plus a row to add one.
+fn rules_row(settings: &Settings, e: &Entry, value: Option<&glib::Variant>) -> adw::ExpanderRow {
+    let row = adw::ExpanderRow::builder().title(e.title.as_str()).subtitle("Open apps on a workspace, floating, maximized, on top\u{2026}").build();
+    let rules: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(value.and_then(|v| v.get::<Vec<String>>()).unwrap_or_default()));
+    let rows: Rc<RefCell<Vec<gtk::Widget>>> = Rc::default();
+    let help = adw::ActionRow::builder().subtitle(e.help.as_str()).css_classes(["dim-label"]).build();
+    help.set_subtitle_lines(0);
+    row.add_row(&help);
+
+    type Redraw = Rc<RefCell<Option<Box<dyn Fn()>>>>;
+    let redraw: Redraw = Rc::default();
+    let save = {
+        let settings = settings.clone();
+        let rules = rules.clone();
+        Rc::new(move || settings.set("window-rules", rules.borrow().to_variant()))
+    };
+    let add = adw::EntryRow::builder().title("Add a Rule (e.g. firefox -> workspace=2 maximize)").show_apply_button(true).build();
+    {
+        let row = row.clone();
+        let rules = rules.clone();
+        let rows = rows.clone();
+        let save = save.clone();
+        let redraw2 = redraw.clone();
+        let add = add.clone();
+        *redraw.borrow_mut() = Some(Box::new(move || {
+            for r in rows.borrow_mut().drain(..) {
+                row.remove(&r);
+            }
+            row.remove(&add);
+            for (i, rule) in rules.borrow().iter().enumerate() {
+                let entry = adw::EntryRow::builder().text(rule.as_str()).show_apply_button(true).build();
+                let remove = gtk::Button::builder().icon_name("user-trash-symbolic").valign(gtk::Align::Center).tooltip_text("Remove Rule").css_classes(["flat"]).build();
+                {
+                    let rules = rules.clone();
+                    let save = save.clone();
+                    entry.connect_apply(move |en| {
+                        if let Some(slot) = rules.borrow_mut().get_mut(i) {
+                            *slot = en.text().to_string();
+                        }
+                        save();
+                    });
+                }
+                {
+                    let rules = rules.clone();
+                    let save = save.clone();
+                    let redraw = redraw2.clone();
+                    remove.connect_clicked(move |_| {
+                        if i < rules.borrow().len() {
+                            rules.borrow_mut().remove(i);
+                        }
+                        save();
+                        let r = redraw.clone();
+                        glib::idle_add_local_once(move || {
+                            if let Some(f) = r.borrow().as_ref() {
+                                f()
+                            }
+                        });
+                    });
+                }
+                entry.add_suffix(&remove);
+                row.add_row(&entry);
+                rows.borrow_mut().push(entry.upcast());
+            }
+            row.add_row(&add);
+        }));
+    }
+    row.add_row(&add);
+    {
+        let rules = rules.clone();
+        let redraw = redraw.clone();
+        add.connect_apply(move |en| {
+            let text = en.text().trim().to_string();
+            if text.contains("->") {
+                rules.borrow_mut().push(text);
+                en.set_text("");
+                save();
+                let r = redraw.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(f) = r.borrow().as_ref() {
+                        f()
+                    }
+                });
+            }
+        });
+    }
+    if let Some(f) = redraw.borrow().as_ref() {
+        f()
+    }
+    row
 }

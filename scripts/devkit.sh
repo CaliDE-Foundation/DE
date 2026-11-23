@@ -55,6 +55,11 @@ exec dbus-run-session -- bash -c '
         "$(dirname "$0")/calictl" $cmd || true
       done
     fi
+    # CALI_APP_LATE=<app>: start an app after those settings (window rules).
+    if [ -n "${CALI_APP_LATE:-}" ]; then
+      sleep 1
+      WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland $CALI_APP_LATE >>/tmp/app.log 2>&1 &
+    fi
     # CALI_DEBUG_NOTIFY=<text>: send a notification a few seconds later.
     if [ -n "${CALI_DEBUG_NOTIFY:-}" ]; then
       sleep 4

@@ -549,7 +549,8 @@ fn map(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) v
     if (!appWindow(window_actor)) return c.meta_plugin_map_completed(plugin, window_actor);
     overview.windowMapped();
 
-    tiling.windowMapped(c.meta_window_actor_get_meta_window(window_actor));
+    const meta_window = c.meta_window_actor_get_meta_window(window_actor);
+    tiling.windowMapped(meta_window, @import("rules.zig").apply(meta_window));
     if (config.open_animation == .none) return c.meta_plugin_map_completed(plugin, window_actor);
 
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));

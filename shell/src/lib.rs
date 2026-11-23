@@ -20,12 +20,42 @@ mod icons;
 mod menu;
 mod overview;
 mod panel;
+mod rules;
 mod workspaces;
 
 pub use calendar::CaliDay;
 pub use dock::CaliDockStyle;
 pub use status::CaliStatus;
 pub use wobble::CaliWobble;
+pub use rules::CaliRuleActions;
+
+/// Replaces the window rules (one "MATCH -> ACTIONS" per line).
+///
+/// # Safety
+/// `text` must be a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_set_window_rules(text: *const c_char) {
+    if !text.is_null() {
+        rules::set(&CStr::from_ptr(text).to_string_lossy());
+    }
+}
+
+/// The actions for a window, from every rule that matches its app id,
+/// class or title. Returns false if no rule matches.
+///
+/// # Safety
+/// Strings may be null; `out` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_window_rules_for(app: *const c_char, class: *const c_char, title: *const c_char, out: *mut CaliRuleActions) -> bool {
+    let s = |p: *const c_char| if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() };
+    match rules::lookup(&s(app), &s(class), &s(title)) {
+        Some(a) if !out.is_null() => {
+            *out = a;
+            true
+        }
+        _ => false,
+    }
+}
 
 /// Sets the clock's date and 12/24-hour options.
 #[no_mangle]

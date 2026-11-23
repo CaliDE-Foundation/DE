@@ -222,6 +222,13 @@ fn apply(key: [:0]const u8, value: ?*c.GVariant) void {
         @import("lock.zig").setIdle(idle_minutes, lock_on_idle);
     } else if (eql(u8, key, "wallpaper") and is(value, "s")) {
         plugin.setWallpaper(c.g_variant_get_string(value, null));
+    } else if (eql(u8, key, "window-rules") and is(value, "as")) {
+        var n: usize = 0;
+        const items = c.g_variant_get_strv(value, &n);
+        defer c.g_free(@ptrCast(items));
+        const joined = c.g_strjoinv("\n", @constCast(@ptrCast(items)));
+        defer c.g_free(joined);
+        @import("rules.zig").set(joined);
     } else if (eql(u8, key, "keyboard-layouts") and is(value, "as")) {
         var n: usize = 0;
         const items = c.g_variant_get_strv(value, &n);

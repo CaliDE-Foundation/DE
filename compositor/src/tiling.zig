@@ -52,14 +52,15 @@ fn onWindowCreated(_: ?*c.MetaDisplay, window: ?*c.MetaWindow, _: c.gpointer) ca
 }
 
 /// A window appeared (from the map effect): add it to the layout.
-pub fn windowMapped(window: ?*c.MetaWindow) void {
+/// `rule` is a window rule's choice: -1 none, 0 tile, 1 float.
+pub fn windowMapped(window: ?*c.MetaWindow, rule: i8) void {
     const w = window orelse return;
     if (!isTileable(w)) return;
     for (order[0..n_order]) |o| if (o == w) return;
     if (n_order == max_windows) return;
     order[n_order] = w;
     n_order += 1;
-    if (!config.tiling_new_tiled) setFloating(w, true);
+    if (rule == 1 or (rule == -1 and !config.tiling_new_tiled)) setFloating(w, true);
     schedule();
 }
 

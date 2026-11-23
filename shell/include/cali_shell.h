@@ -147,6 +147,22 @@ size_t cali_shell_overview_layout(CaliRect area, const CaliRect *windows,
 size_t cali_shell_overview_layout_gap(CaliRect area, const CaliRect *windows,
                                       size_t n, float gap, CaliRect *out);
 
+/* Window rules ("MATCH -> ACTIONS" per line). */
+typedef struct {
+    int workspace;      /* 1-based, 0 = no rule */
+    signed char floating; /* -1 no rule, 0 tile, 1 float */
+    bool maximize;
+    bool fullscreen;
+    bool center;
+    bool above;
+    bool sticky;
+    float opacity;      /* < 0 = no rule */
+    int width;          /* 0 = no rule */
+    int height;
+} CaliRuleActions;
+void cali_shell_set_window_rules(const char *text);
+bool cali_shell_window_rules_for(const char *app, const char *wm_class, const char *title, CaliRuleActions *out);
+
 #ifdef __cplusplus
 }
 #endif

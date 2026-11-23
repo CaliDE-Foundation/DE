@@ -157,6 +157,9 @@ var Schema = map[string]Setting{
 		func(v any) string { return strconv.Itoa(int(v.(float64))) }),
 	"workspaces-only-on-primary": gnome(b(true, "Workspaces on Main Screen Only", "Windows", "Workspaces", "Other screens show the same windows on every workspace", true), mutter, "workspaces-only-on-primary", nil),
 
+	"window-rules": {Kind: StringList, Default: []string{}, Title: "Window Rules", Page: "Windows", Group: "Rules",
+		Help: "APP -> ACTIONS, e.g. firefox -> workspace=2 maximize. Actions: workspace=N float tile maximize fullscreen center above sticky opacity=0.9 size=1200x800. APP can be title:TEXT"},
+
 	// ---- Tiling
 	"tiling-mode": choice("off", []string{"off", "dwindle", "scrolling"}, []string{"Off (Floating)", "Hyprland-Style (Dwindle)", "Niri-Style (Scrolling Columns)"},
 		"Tiling", "Tiling", "Layout", "Arrange windows automatically", false),
