@@ -35,9 +35,8 @@ dracut-live
 dracut-config-generic
 livesys-scripts
 anaconda-live
-anaconda-install-env-deps
 @anaconda-tools
-glibc-all-langpacks
+glibc-langpack-en
 shim-x64
 grub2-efi-x64
 grub2-efi-x64-cdboot

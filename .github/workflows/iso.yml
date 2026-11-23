@@ -95,7 +95,7 @@ jobs:
           path: /cali-repo
 
       - name: Install livemedia-creator
-        run: dnf install -y lorax lorax-lmc-novirt pykickstart anaconda-install-env-deps gh
+        run: dnf install -y lorax lorax-lmc-novirt pykickstart anaconda-install-env-deps policycoreutils gh
 
       - name: Build the ISO
         run: |
@@ -103,6 +103,8 @@ jobs:
           livemedia-creator --ks /tmp/calide-live.ks --no-virt --make-iso \
             --resultdir /tmp/result --project CaliDE --releasever 45 \
             --volid CaliDE-Live-45 --iso-only --iso-name calide-live-x86_64.iso \
+            --compression xz --compress-arg=-Xbcj --compress-arg=x86 \
+            --compress-arg=-b --compress-arg=1M \
             --logfile /tmp/lmc.log
           ls -lh /tmp/result
           size=$(stat -c %s /tmp/result/calide-live-x86_64.iso)
