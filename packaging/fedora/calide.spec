@@ -14,7 +14,7 @@ URL:            https://github.com/CaliDE-Foundation/DE
 Source0:        calide.tar.gz
 
 BuildRequires:  cargo rust go make gcc pkgconfig(libsookie-52)
-BuildRequires:  pkgconfig(gtk4) pkgconfig(libadwaita-1)
+BuildRequires:  pkgconfig(gtk4) pkgconfig(libadwaita-1) systemd-rpm-macros
 Requires:       sookie dbus-daemon pam pipewire wireplumber
 Requires:       xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk
 Recommends:     NetworkManager bluez upower mate-polkit orca python3-gobject
