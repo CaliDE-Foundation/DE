@@ -41,7 +41,9 @@ jobs:
         run: |
           rpmdev-setuptree
           commit=$(git -C sookie rev-parse --short HEAD)
-          git -C sookie archive --prefix=sookie/ -o ~/rpmbuild/SOURCES/sookie.tar.gz HEAD
+          # Fedora builds don't download, so fetch Mutter's subprojects (gvdb) first.
+          (cd sookie && meson subprojects download)
+          tar --exclude=.git -czf ~/rpmbuild/SOURCES/sookie.tar.gz sookie
           rpmbuild -bb --define "commit $commit" sookie/packaging/fedora/sookie.spec
           dnf install -y ~/rpmbuild/RPMS/x86_64/sookie-*.rpm
 

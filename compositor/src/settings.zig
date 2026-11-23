@@ -81,6 +81,11 @@ const bool_settings = [_]BoolSetting{
     .{ .name = "wobbly-windows", .ptr = &cfg.wobbly },
     .{ .name = "dynamic-workspaces", .ptr = &cfg.dynamic_workspaces },
     .{ .name = "alt-tab-current-workspace", .ptr = &cfg.alt_tab_current_workspace },
+    .{ .name = "high-contrast", .ptr = &cfg.high_contrast },
+    .{ .name = "large-text", .ptr = &cfg.large_text },
+    .{ .name = "reduce-motion", .ptr = &cfg.reduce_motion },
+    .{ .name = "screen-reader", .ptr = &cfg.screen_reader },
+    .{ .name = "focus-outlines", .ptr = &cfg.focus_outlines },
 };
 
 var clock_date = true;

@@ -19,7 +19,7 @@ pub var accent: u32 = 0xe2725bff;
 /// A duration scaled by the animation speed. Never 0: effects wait for
 /// "transitions-completed", which an instant change wouldn't send.
 pub fn ms(base: c_uint) c_uint {
-    if (speed <= 0.01) return 1;
+    if (speed <= 0.01 or @import("config.zig").reduce_motion) return 1;
     const scaled = @as(f32, @floatFromInt(base)) / speed;
     return @max(1, @as(c_uint, @intFromFloat(@min(scaled, 10000))));
 }
@@ -54,7 +54,9 @@ fn withContent(width: f32, height: f32, content: ?*c.ClutterContent) *c.ClutterA
 }
 
 /// An actor showing a rounded rectangle. `rgba` is 0xRRGGBBAA.
-pub fn roundedRect(width: f32, height: f32, radius: f32, rgba: u32) *c.ClutterActor {
+pub fn roundedRect(width: f32, height: f32, radius: f32, color: u32) *c.ClutterActor {
+    const rgba = contrast(color);
+    if (!(width > 0 and width < 8192 and height > 0 and height < 8192)) return withContent(0, 0, null);
     const w: c_uint = @intFromFloat(@ceil(width * render_scale));
     const h: c_uint = @intFromFloat(@ceil(height * render_scale));
     const len = @as(usize, w) * h * 4;
@@ -68,6 +70,25 @@ pub fn roundedRect(width: f32, height: f32, radius: f32, rgba: u32) *c.ClutterAc
         } else |_| {}
     }
     return withContent(width, height, content);
+}
+
+/// High contrast: faint white fills (buttons, cards, toggles) get much
+/// stronger and dark surfaces turn solid black, so edges are easy to see.
+pub fn contrast(rgba: u32) u32 {
+    if (!@import("config.zig").high_contrast) return rgba;
+    const r = rgba >> 24;
+    const g = (rgba >> 16) & 0xff;
+    const b = (rgba >> 8) & 0xff;
+    const a = rgba & 0xff;
+    if (r > 0xd0 and g > 0xd0 and b > 0xd0 and a < 0x80) return (rgba & 0xffffff00) | @min(0xff, a * 3 + 0x30);
+    if (r < 0x60 and g < 0x60 and b < 0x60 and a >= 0x80) return 0x000000ff;
+    return rgba;
+}
+
+/// Names an actor for screen readers (Orca reads `name`).
+pub fn accessible(actor: ?*c.ClutterActor, role: c.AtkRole, name: [*:0]const u8) void {
+    c.clutter_actor_set_accessible_role(actor, role);
+    c.clutter_actor_set_accessible_name(actor, name);
 }
 
 /// An actor showing icon `name`. With `recolor`, a symbolic icon is painted
@@ -177,6 +198,11 @@ pub fn openPopup(content: *c.ClutterActor, on_close: ?*const fn () void) void {
     popup_on_close = on_close;
 
     setPopupContent(content);
+    // CALI_DEBUG_FOCUS=<n>: press Tab n times, to check keyboard navigation.
+    if (std.posix.getenv("CALI_DEBUG_FOCUS")) |v| {
+        const n = std.fmt.parseInt(usize, v, 10) catch 1;
+        for (0..n) |_| moveFocus(1);
+    }
 
     // Grow in from the top.
     c.clutter_actor_set_pivot_point(content, 0.5, 0.0);
@@ -191,6 +217,7 @@ pub fn openPopup(content: *c.ClutterActor, on_close: ?*const fn () void) void {
 /// Swaps what the open popup shows (e.g. the next month, a confirmation).
 pub fn setPopupContent(content: *c.ClutterActor) void {
     const catcher = popup_catcher orelse return;
+    resetFocus();
     if (popup_content) |old| c.clutter_actor_destroy(old);
     c.clutter_actor_set_reactive(content, 1); // clicks inside don't close it
     plugin.connect(content, "button-release-event", &swallowClick, null);
@@ -205,6 +232,7 @@ pub fn closePopup() void {
         popup_grab = null;
     }
     const catcher = popup_catcher orelse return;
+    resetFocus();
     popup_catcher = null;
     popup_content = null;
     c.clutter_actor_destroy(catcher);
@@ -223,11 +251,131 @@ fn onPopupOutside(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callc
 }
 
 fn onPopupKey(_: ?*c.ClutterActor, event: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
-    if (c.clutter_event_get_key_symbol(event) == c.CLUTTER_KEY_Escape) {
-        closePopup();
-        return 1;
+    const key = c.clutter_event_get_key_symbol(event);
+    const shift = (c.clutter_event_get_state(event) & c.CLUTTER_SHIFT_MASK) != 0;
+    switch (key) {
+        c.CLUTTER_KEY_Escape => closePopup(),
+        c.CLUTTER_KEY_Tab, c.CLUTTER_KEY_ISO_Left_Tab => moveFocus(if (shift or key == c.CLUTTER_KEY_ISO_Left_Tab) -1 else 1),
+        c.CLUTTER_KEY_Down, c.CLUTTER_KEY_Right => moveFocus(1),
+        c.CLUTTER_KEY_Up, c.CLUTTER_KEY_Left => moveFocus(-1),
+        c.CLUTTER_KEY_Return, c.CLUTTER_KEY_KP_Enter, c.CLUTTER_KEY_space => activateFocus(event),
+        else => return 0,
     }
-    return 0;
+    return 1;
+}
+
+// ---- Keyboard navigation in popups ---------------------------------------------------------
+// Tab/arrows walk through the popup's clickable items in order, Enter or
+// Space clicks the one with the outline. Key focus follows, so screen
+// readers announce each item.
+
+const max_focusable = 256;
+var focus_index: ?usize = null;
+var focus_ring: ?*c.ClutterActor = null;
+
+fn collectFocusable(actor: *c.ClutterActor, out: *[max_focusable]*c.ClutterActor, n: *usize, root: bool) void {
+    if (!root and c.clutter_actor_is_visible(actor) == 0) return;
+    if (!root and c.clutter_actor_get_reactive(actor) != 0 and n.* < max_focusable) {
+        out[n.*] = actor;
+        n.* += 1;
+    }
+    var child = c.clutter_actor_get_first_child(actor);
+    while (child) |ch| : (child = c.clutter_actor_get_next_sibling(ch)) {
+        if (ch == focus_ring) continue;
+        collectFocusable(ch, out, n, false);
+    }
+}
+
+fn resetFocus() void {
+    focus_index = null;
+    if (focus_ring) |r| c.clutter_actor_destroy(r);
+    focus_ring = null;
+}
+
+fn moveFocus(step: i32) void {
+    const content = popup_content orelse return;
+    var items: [max_focusable]*c.ClutterActor = undefined;
+    var n: usize = 0;
+    collectFocusable(content, &items, &n, true);
+    if (n == 0) return;
+    const count: i32 = @intCast(n);
+    const current: i32 = if (focus_index) |i| @intCast(@min(i, n - 1)) else if (step > 0) -1 else count;
+    const next: usize = @intCast(@mod(current + step, count));
+    focus_index = next;
+    const target = items[next];
+
+    // The outline: an accent highlight over the item, inside the popup.
+    if (focus_ring) |r| c.clutter_actor_destroy(r);
+    focus_ring = null;
+    if (@import("config.zig").focus_outlines) {
+        // Position relative to the popup, from the actors' own geometry (the
+        // popup may not be laid out yet, so no transformed coordinates).
+        var x: f32 = 0;
+        var y: f32 = 0;
+        var walk: ?*c.ClutterActor = target;
+        while (walk) |a| : (walk = c.clutter_actor_get_parent(a)) {
+            if (a == content) break;
+            x += c.clutter_actor_get_x(a);
+            y += c.clutter_actor_get_y(a);
+        }
+        var w: f32 = 0;
+        var h: f32 = 0;
+        c.clutter_actor_get_size(target, &w, &h);
+        // A white frame, visible on accent toggles and plain rows alike.
+        const ring = c.clutter_actor_new();
+        c.clutter_actor_set_position(ring, x - 3, y - 3);
+        c.clutter_actor_set_size(ring, w + 6, h + 6);
+        const t: f32 = 2;
+        const bars = [_][4]f32{ .{ 0, 0, w + 6, t }, .{ 0, h + 6 - t, w + 6, t }, .{ 0, 0, t, h + 6 }, .{ w + 6 - t, 0, t, h + 6 } };
+        for (bars) |bar| {
+            const piece = c.clutter_actor_new();
+            c.clutter_actor_set_background_color(piece, &white);
+            c.clutter_actor_set_position(piece, bar[0], bar[1]);
+            c.clutter_actor_set_size(piece, bar[2], bar[3]);
+            c.clutter_actor_add_child(ring, piece);
+        }
+        c.clutter_actor_set_reactive(ring, 0);
+        c.clutter_actor_add_child(content, ring);
+        focus_ring = ring;
+    }
+    // Key focus on the item tells screen readers about it; key events still
+    // bubble up to the popup's key handler.
+    if (stage) |st| c.clutter_stage_set_key_focus(@ptrCast(@alignCast(st)), target);
+}
+
+extern fn clutter_event_button_new(
+    event_type: c.ClutterEventType,
+    flags: c.ClutterEventFlags,
+    timestamp_us: i64,
+    source_device: ?*c.ClutterInputDevice,
+    tool: ?*c.ClutterInputDeviceTool,
+    modifiers: c.ClutterModifierType,
+    coords: c.graphene_point_t,
+    button: c_int,
+    evcode: u32,
+    axes: ?*f64,
+) ?*c.ClutterEvent;
+
+/// "Clicks" the focused item: sends it the button release its handlers
+/// listen for, at its center.
+fn activateFocus(key_event: ?*c.ClutterEvent) void {
+    const content = popup_content orelse return;
+    const index = focus_index orelse return moveFocus(1);
+    var items: [max_focusable]*c.ClutterActor = undefined;
+    var n: usize = 0;
+    collectFocusable(content, &items, &n, true);
+    if (index >= n) return;
+    const target = items[index];
+    var x: f32 = 0;
+    var y: f32 = 0;
+    var w: f32 = 0;
+    var h: f32 = 0;
+    c.clutter_actor_get_transformed_position(target, &x, &y);
+    c.clutter_actor_get_transformed_size(target, &w, &h);
+    const device = c.clutter_event_get_source_device(key_event);
+    const click = clutter_event_button_new(c.CLUTTER_BUTTON_RELEASE, 0, c.g_get_monotonic_time(), device, null, 0, .{ .x = x + w / 2, .y = y + h / 2 }, 1, 0, null) orelse return;
+    defer c.clutter_event_free(click);
+    _ = c.clutter_actor_event(target, click, 0);
 }
 
 /// A rounded button showing a white symbolic icon; `handler` gets `data`.
@@ -237,6 +385,7 @@ pub fn iconButton(name: [*:0]const u8, size: f32, handler: anytype, data: c.gpoi
     center(glyph, button, c.CLUTTER_ALIGN_BOTH);
     c.clutter_actor_add_child(button, glyph);
     c.clutter_actor_set_reactive(button, 1);
+    accessible(button, c.ATK_ROLE_PUSH_BUTTON, iconLabel(name));
     plugin.connect(button, "button-release-event", handler, data);
     return button;
 }
@@ -276,6 +425,7 @@ pub fn menu(x: f32, y: f32, labels: []const [*:0]const u8, callback: MenuCallbac
         center(text, row, c.CLUTTER_ALIGN_Y_AXIS);
         c.clutter_actor_add_child(row, text);
         c.clutter_actor_set_reactive(row, 1);
+        accessible(row, c.ATK_ROLE_MENU_ITEM, l);
         plugin.connect(row, "enter-event", &onMenuEnter, hover);
         plugin.connect(row, "leave-event", &onMenuLeave, hover);
         plugin.connect(row, "button-release-event", &onMenuRow, @ptrFromInt(i + 1));
@@ -327,4 +477,22 @@ pub fn image(path: [*:0]const u8, size: f32) *c.ClutterActor {
         return actor;
     }
     return icon(path, size, false, 0);
+}
+
+/// A readable name for an icon-only button, from its icon name
+/// ("go-previous-symbolic" -> "go previous"). Callers with a better name
+/// use accessible() afterwards.
+fn iconLabel(name: [*:0]const u8) [*:0]const u8 {
+    const Ring = struct {
+        var bufs: [8][64]u8 = undefined;
+        var next: usize = 0;
+    };
+    const buf = &Ring.bufs[Ring.next];
+    Ring.next = (Ring.next + 1) % Ring.bufs.len;
+    var text: []const u8 = std.mem.span(name);
+    if (std.mem.endsWith(u8, text, "-symbolic")) text = text[0 .. text.len - "-symbolic".len];
+    const n = @min(text.len, buf.len - 1);
+    for (text[0..n], 0..) |ch, i| buf[i] = if (ch == '-') ' ' else ch;
+    buf[n] = 0;
+    return @ptrCast(buf);
 }

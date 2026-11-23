@@ -41,6 +41,11 @@ fn onClockClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callc
     return 1;
 }
 
+/// Super+V: open or close the date menu.
+pub fn toggle() void {
+    if (open) ui.closePopup() else show();
+}
+
 fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {
     if (!open) show();
     return 0;

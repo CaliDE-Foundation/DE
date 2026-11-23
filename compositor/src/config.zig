@@ -52,6 +52,13 @@ pub var alt_tab_windows = false;
 pub var alt_tab_current_workspace = true;
 pub var notifications_top_right = false;
 
+// ---- Accessibility
+pub var high_contrast = false;
+pub var large_text = false;
+pub var reduce_motion = false;
+pub var screen_reader = false;
+pub var focus_outlines = true;
+
 /// The bar height in whole pixels.
 pub fn panelHeight() c_int {
     return @intFromFloat(panel_height);
@@ -81,7 +88,8 @@ pub fn font(weight: Weight, delta: f32) [*:0]const u8 {
     const buf = &font_ring[font_next];
     font_next = (font_next + 1) % font_ring.len;
     const family = std.mem.sliceTo(&font_family, 0);
-    const size = @max(6, font_size + delta);
+    const scale: f32 = if (large_text) 1.25 else 1.0;
+    const size = @round(@max(6, font_size + delta) * scale * 10) / 10;
     const text = std.fmt.bufPrintZ(buf, "{s}{s} {d}", .{ family, if (weight == .bold) " Bold" else "", size }) catch return "Sans 11";
     return text.ptr;
 }

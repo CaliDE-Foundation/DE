@@ -38,6 +38,7 @@ pub fn build(b: *std.Build) void {
         // Found through pkg-config (libsookie-52.pc). Run `make sookie-fetch`
         // to get a prebuilt Sookie, or install one system-wide.
         exe.linkSystemLibrary2("libsookie-52", .{ .use_pkg_config = .force });
+        exe.linkSystemLibrary2("atk-bridge-2.0", .{ .use_pkg_config = .force });
     }
 
     b.installArtifact(exe);

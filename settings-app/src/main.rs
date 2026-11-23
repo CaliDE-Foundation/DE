@@ -15,20 +15,21 @@ use serde::Deserialize;
 const APP_ID: &str = "org.calide.Settings";
 
 /// Pages in order, with their icons.
-const PAGES: [(&str, &str); 6] = [
+const PAGES: [(&str, &str); 7] = [
     ("Appearance", "applications-graphics-symbolic"),
     ("Top Bar", "view-continuous-symbolic"),
     ("Overview", "view-app-grid-symbolic"),
     ("Windows", "window-new-symbolic"),
     ("Tiling", "view-grid-symbolic"),
     ("Behavior", "preferences-system-symbolic"),
+    ("Accessibility", "preferences-desktop-accessibility-symbolic"),
 ];
 
 /// Groups in the order they appear on their page.
-const GROUP_ORDER: [&str; 19] = [
+const GROUP_ORDER: [&str; 23] = [
     "Style", "Background", "Bar", "Clock", "Indicators", "Overview", "App Grid", "Dock", "Calendar",
     "Animations", "Behavior", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Notifications",
-    "Screen", "Keyboard",
+    "Screen", "Keyboard", "Seeing", "Hearing", "Typing", "Pointing",
 ];
 
 /// Built-in wallpapers: (setting value, label).

@@ -102,7 +102,7 @@ fn isMove(op: c_uint) bool {
 }
 
 fn onGrabBegin(_: ?*c.MetaDisplay, w: ?*c.MetaWindow, op: c_uint, _: ?*anyopaque, _: c.gpointer) callconv(.C) void {
-    if (!config.wobbly or !isMove(op)) return;
+    if (!config.wobbly or config.reduce_motion or !isMove(op)) return;
     start(w orelse return);
 }
 

@@ -33,6 +33,12 @@ var shown_percent: i32 = -1;
 
 /// Re-applies settings that change the status area.
 pub fn restyle() void {
+    style = c.cali_shell_menu_style();
+    if (config.large_text) {
+        // Room for 25% bigger text.
+        style.width *= 1.25;
+        style.row_height *= 1.25;
+    }
     if (icons_box) |box| c.clutter_actor_set_height(box, @floatFromInt(config.panelHeight()));
     shown_icons = .{null} ** 8; // force a rebuild
     refreshIcons();
@@ -117,6 +123,11 @@ fn refreshIcons() void {
 fn onStatusClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
     if (popup == null) open() else close();
     return 1;
+}
+
+/// Super+S: open or close quick settings.
+pub fn toggle() void {
+    if (popup == null) open() else close();
 }
 
 fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {

@@ -68,8 +68,14 @@ func gnome(st Setting, schema, key string, value func(any) string) Setting {
 }
 
 const (
-	wmPrefs = "org.gnome.desktop.wm.preferences"
-	mutter  = "org.gnome.mutter"
+	wmPrefs    = "org.gnome.desktop.wm.preferences"
+	mutter     = "org.gnome.mutter"
+	iface      = "org.gnome.desktop.interface"
+	a11yApps   = "org.gnome.desktop.a11y.applications"
+	a11yKeys   = "org.gnome.desktop.a11y.keyboard"
+	a11yIface  = "org.gnome.desktop.a11y.interface"
+	a11yPage   = "Accessibility"
+	gnomeFalse = "false"
 )
 
 func quoted(v any) string { return "'" + fmt.Sprint(v) + "'" }
@@ -145,6 +151,32 @@ var Schema = map[string]Setting{
 	"tiling-outer-gap":    n(12, 0, 64, 2, "Gap at Screen Edges", "Tiling", "Layout", "Pixels between windows and the screen edge", true),
 	"tiling-split-ratio":  n(0.5, 0.2, 0.8, 0.05, "Split Ratio", "Tiling", "Dwindle", "How much room the first window of each split gets", true),
 	"tiling-column-width": n(0.5, 0.25, 1, 0.05, "Column Width", "Tiling", "Scrolling", "Share of the screen each column takes", true),
+
+	// ---- Accessibility
+	"screen-reader": gnome(b(false, "Screen Reader", a11yPage, "Seeing", "Orca reads the screen aloud (Super+Alt+S)", false), a11yApps, "screen-reader-enabled", nil),
+	"high-contrast": gnome(b(false, "High Contrast", a11yPage, "Seeing", "Stronger colors and outlines in the shell and apps", false), a11yIface, "high-contrast", nil),
+	"large-text": gnome(b(false, "Large Text", a11yPage, "Seeing", "Bigger text in the shell and apps", false), iface, "text-scaling-factor",
+		func(v any) string {
+			if v == true {
+				return "1.25"
+			}
+			return "1.0"
+		}),
+	"cursor-size": gnome(choice("24", []string{"24", "32", "48", "64", "96"}, []string{"Default", "Medium", "Large", "Larger", "Largest"},
+		"Cursor Size", a11yPage, "Seeing", "How big the pointer is", false), iface, "cursor-size", func(v any) string { return fmt.Sprint(v) }),
+	"reduce-motion": gnome(b(false, "Reduce Motion", a11yPage, "Seeing", "Turn off animations and wobbling", false), iface, "enable-animations",
+		func(v any) string {
+			if v == true {
+				return gnomeFalse
+			}
+			return "true"
+		}),
+	"visual-alerts":  gnome(b(false, "Visual Alerts", a11yPage, "Hearing", "Flash the screen when an alert sound plays", false), wmPrefs, "visual-bell", nil),
+	"sticky-keys":    gnome(b(false, "Sticky Keys", a11yPage, "Typing", "Press shortcuts one key at a time", false), a11yKeys, "stickykeys-enable", nil),
+	"slow-keys":      gnome(b(false, "Slow Keys", a11yPage, "Typing", "Keys must be held a moment before they count", false), a11yKeys, "slowkeys-enable", nil),
+	"bounce-keys":    gnome(b(false, "Bounce Keys", a11yPage, "Typing", "Ignore fast repeated presses of the same key", false), a11yKeys, "bouncekeys-enable", nil),
+	"mouse-keys":     gnome(b(false, "Mouse Keys", a11yPage, "Pointing", "Move the pointer with the number pad", false), a11yKeys, "mousekeys-enable", nil),
+	"focus-outlines": b(true, "Focus Outlines", a11yPage, "Typing", "Highlight what the keyboard is on in shell menus (Tab, arrows, Enter)", true),
 
 	// ---- Behavior
 	"alt-tab-mode":              choice("apps", []string{"apps", "windows"}, []string{"Apps", "Windows"}, "Alt+Tab Switches", "Behavior", "Switching", "Between apps or between every window", false),

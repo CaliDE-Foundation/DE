@@ -48,6 +48,7 @@ pub const c = @cImport({
     @cInclude("meta/keybindings.h");
     @cInclude("meta/prefs.h");
     @cInclude("meta/meta-cursor-tracker.h");
+    @cInclude("atk-bridge.h");
     @cInclude("cali_shell.h");
 });
 
@@ -121,6 +122,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
 
     session.init();
     session.startHelpers();
+    @import("a11y.zig").init(d);
     ui.init(stage);
     createPanel(stage);
     overview.init(d, stage, panel);
@@ -349,6 +351,7 @@ pub fn restyle() void {
     @import("calendar.zig").refresh();
     @import("dock.zig").rebuild();
     tiling.retileAll();
+    @import("a11y.zig").update();
 }
 var stage_actor: ?*c.ClutterActor = null;
 
