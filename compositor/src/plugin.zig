@@ -129,6 +129,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     workspaces.init(d, stage, panel);
     statusmenu.init(d, stage, panel);
     @import("panelitems.zig").init(panel);
+    @import("deskdock.zig").init(d, stage);
     calendar.init(stage, clock);
     switcher.init(d, stage);
     notifications.init(stage);
@@ -342,7 +343,8 @@ pub fn setWallpaperStyle(name: []const u8) void {
 pub fn restyle() void {
     if (panel) |p| {
         const alpha: u8 = @intFromFloat(std.math.clamp(config.panel_opacity, 0, 1) * 255);
-        c.clutter_actor_set_background_color(p, &c.CoglColor{ .red = 0, .green = 0, .blue = 0, .alpha = alpha });
+        const rgb = config.panel_rgb;
+        c.clutter_actor_set_background_color(p, &c.CoglColor{ .red = @truncate(rgb >> 16), .green = @truncate(rgb >> 8), .blue = @truncate(rgb), .alpha = alpha });
         if (clock) |t| c.clutter_text_set_font_name(@ptrCast(@alignCast(t)), config.font(.bold, 0));
     }
     layoutPanel();
@@ -351,6 +353,7 @@ pub fn restyle() void {
     statusmenu.restyle();
     @import("calendar.zig").refresh();
     @import("dock.zig").rebuild();
+    @import("deskdock.zig").rebuild();
     tiling.retileAll();
     @import("a11y.zig").update();
 }
@@ -436,13 +439,20 @@ fn layoutPanel() void {
     applyStruts();
 }
 
+/// Re-applies the reserved areas (the dock appeared, moved or went away).
+pub fn updateStruts() void {
+    applyStruts();
+}
+
 /// Reserve the bar's area on every workspace so windows stay below it.
 fn applyStruts() void {
     const d = display orelse return;
     const manager = c.meta_display_get_workspace_manager(d);
 
     var strut = c.MetaStrut{ .rect = panel_rect, .side = @intCast(c.META_SIDE_TOP) };
-    const list = c.g_slist_append(null, &strut);
+    var list = c.g_slist_append(null, &strut);
+    var dock_strut = @import("deskdock.zig").reserved();
+    if (dock_strut != null) list = c.g_slist_append(list, &dock_strut.?);
     defer c.g_slist_free(list); // Sookie copies the list.
 
     const n = c.meta_workspace_manager_get_n_workspaces(manager);

@@ -88,6 +88,36 @@ const bool_settings = [_]BoolSetting{
     .{ .name = "focus-outlines", .ptr = &cfg.focus_outlines },
 };
 
+// Color settings, kept as text and turned into colors together.
+var color_text: [6][32]u8 = .{
+    ("coral" ++ "\x00" ** 27).*, ("#e2725b" ++ "\x00" ** 25).*,
+    ("charcoal" ++ "\x00" ** 24).*, ("#2e2e32" ++ "\x00" ** 25).*,
+    ("black" ++ "\x00" ** 27).*, ("#000000" ++ "\x00" ** 25).*,
+};
+const color_keys = [_][]const u8{ "accent-color", "accent-custom", "surface-color", "surface-custom", "panel-color", "panel-custom" };
+
+fn colorText(i: usize) []const u8 {
+    return std.mem.sliceTo(&color_text[i], 0);
+}
+
+fn recomputeColors() void {
+    const eql = std.mem.eql;
+    ui.accent = if (eql(u8, colorText(0), "custom"))
+        ((cfg.parseHex(colorText(1)) orelse 0xe2725b) << 8) | 0xff
+    else
+        c.cali_shell_accent_rgba(@ptrCast(&color_text[0]));
+    const surfaces = [_]struct { []const u8, u32 }{
+        .{ "charcoal", 0x2e2e32 }, .{ "black", 0x141416 }, .{ "slate", 0x2b3245 },
+        .{ "plum", 0x3b2c40 },     .{ "forest", 0x253a2f }, .{ "mocha", 0x3b302a },
+    };
+    cfg.surface_rgb = cfg.parseHex(colorText(3)) orelse 0x2e2e32;
+    for (surfaces) |entry| {
+        if (eql(u8, colorText(2), entry[0])) cfg.surface_rgb = entry[1];
+    }
+    const panel = colorText(4);
+    cfg.panel_rgb = if (eql(u8, panel, "surface")) cfg.surface_rgb else if (eql(u8, panel, "accent")) ui.accent >> 8 else if (eql(u8, panel, "custom")) (cfg.parseHex(colorText(5)) orelse 0) else 0;
+}
+
 var clock_date = true;
 var clock_24h = true;
 
@@ -117,6 +147,22 @@ fn applyConfig(key: []const u8, value: ?*c.GVariant) bool {
     }
     if (is(value, "s")) {
         const text = std.mem.span(c.g_variant_get_string(value, null));
+        for (color_keys, 0..) |name, i| {
+            if (!eql(u8, key, name)) continue;
+            const n = @min(text.len, 31);
+            @memcpy(color_text[i][0..n], text[0..n]);
+            color_text[i][n] = 0;
+            recomputeColors();
+            return true;
+        }
+        if (eql(u8, key, "dock-mode")) {
+            cfg.dock_mode = cfg.parseEnum(cfg.DockMode, text, .overview);
+            return true;
+        }
+        if (eql(u8, key, "dock-position")) {
+            cfg.dock_position = cfg.parseEnum(cfg.DockPosition, text, .bottom);
+            return true;
+        }
         if (eql(u8, key, "shell-font")) {
             cfg.setFont(text);
         } else if (eql(u8, key, "clock-position")) {
@@ -150,9 +196,7 @@ fn apply(key: [:0]const u8, value: ?*c.GVariant) void {
         std.log.debug("settings: {s} applied", .{key});
         return;
     }
-    if (eql(u8, key, "accent-color") and is(value, "s")) {
-        ui.accent = c.cali_shell_accent_rgba(c.g_variant_get_string(value, null));
-    } else if (eql(u8, key, "animation-speed") and is(value, "d")) {
+    if (eql(u8, key, "animation-speed") and is(value, "d")) {
         ui.speed = @floatCast(c.g_variant_get_double(value));
     } else if (eql(u8, key, "hot-corner") and is(value, "b")) {
         overview.hot_corner_enabled = c.g_variant_get_boolean(value) != 0;

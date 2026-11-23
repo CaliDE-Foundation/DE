@@ -115,7 +115,7 @@ pub fn clear() void {
     n_apps = 0;
 }
 
-fn appIcon(info: *c.GAppInfo, size: f32) *c.ClutterActor {
+pub fn appIcon(info: *c.GAppInfo, size: f32) *c.ClutterActor {
     var name: [*:0]const u8 = "application-x-executable";
     var owned: ?[*:0]u8 = null;
     defer if (owned) |o| c.g_free(o);

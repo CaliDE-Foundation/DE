@@ -301,6 +301,7 @@ fn open() void {
     c.clutter_stage_set_key_focus(@ptrCast(@alignCast(s)), g);
 
     state = .opening;
+    @import("deskdock.zig").overviewChanged(true);
 }
 
 fn ease(actor: ?*c.ClutterActor) void {
@@ -590,5 +591,6 @@ fn finishClose() void {
     mode = .windows;
     n_entries = 0;
     state = .closed;
+    @import("deskdock.zig").overviewChanged(false);
     std.log.debug("overview: closed", .{});
 }

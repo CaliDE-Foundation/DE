@@ -48,7 +48,7 @@ type Setting struct {
 }
 
 // AccentColors are the accent color names (colors live in cali-shell).
-var AccentColors = []string{"coral", "blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate"}
+var AccentColors = []string{"coral", "blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate", "custom"}
 
 func b(def bool, title, page, group, help string, advanced bool) Setting {
 	return Setting{Kind: Bool, Default: def, Title: title, Page: page, Group: group, Help: help, Advanced: advanced}
@@ -84,8 +84,18 @@ func quoted(v any) string { return "'" + fmt.Sprint(v) + "'" }
 var Schema = map[string]Setting{
 	// ---- Appearance
 	"accent-color": choice("coral", AccentColors,
-		[]string{"Coral", "Blue", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Slate"},
+		[]string{"Coral", "Blue", "Teal", "Green", "Yellow", "Orange", "Red", "Pink", "Purple", "Slate", "Custom"},
 		"Accent Color", "Appearance", "Style", "Highlights, toggles and today in the calendar", false),
+	"accent-custom": {Kind: String, Default: "#e2725b", Title: "Custom Accent", Page: "Appearance", Group: "Colors",
+		Help: "A hex color like #3584e4, used when Accent Color is Custom", Advanced: true},
+	"surface-color": choice("charcoal", []string{"charcoal", "black", "slate", "plum", "forest", "mocha", "custom"},
+		[]string{"Charcoal", "Black", "Slate", "Plum", "Forest", "Mocha", "Custom"}, "Menus and Popups", "Appearance", "Colors", "Background of menus, popups, notifications and the dock", false),
+	"surface-custom": {Kind: String, Default: "#2e2e32", Title: "Custom Menu Color", Page: "Appearance", Group: "Colors",
+		Help: "A hex color, used when Menus and Popups is Custom", Advanced: true},
+	"panel-color": choice("black", []string{"black", "surface", "accent", "custom"}, []string{"Black", "Same as Menus", "Accent", "Custom"},
+		"Top Bar Color", "Appearance", "Colors", "Opacity is on the Top Bar page", false),
+	"panel-custom": {Kind: String, Default: "#000000", Title: "Custom Top Bar Color", Page: "Appearance", Group: "Colors",
+		Help: "A hex color, used when Top Bar Color is Custom", Advanced: true},
 	"dark-style":      b(true, "Dark Style", "Appearance", "Style", "Ask apps to use their dark look", false),
 	"corner-radius":   n(18, 0, 32, 1, "Corner Roundness", "Appearance", "Style", "How round menus, popups and the dock are", true),
 	"shell-font":      {Kind: String, Default: "Adwaita Sans", Title: "Shell Font", Page: "Appearance", Group: "Style", Help: "Font family for the top bar, menus and overview", Advanced: true},
@@ -117,6 +127,10 @@ var Schema = map[string]Setting{
 		"org.gnome.Nautilus.desktop", "firefox.desktop", "org.gnome.TextEditor.desktop",
 		"org.gnome.Console.desktop", "org.gnome.Software.desktop", "org.gnome.Settings.desktop",
 	}, Title: "Favorite Apps", Page: "Overview", Group: "Dock", Help: "Desktop file names, separated by commas"},
+	"dock-mode": choice("overview", []string{"overview", "always", "autohide"}, []string{"In the Overview (GNOME)", "Always on the Desktop", "On the Desktop, Hide Until Pointed At"},
+		"Show the Dock", "Overview", "Dock", "Where the dock appears", false),
+	"dock-position": choice("bottom", []string{"bottom", "left", "right"}, []string{"Bottom", "Left", "Right"},
+		"Desktop Dock Position", "Overview", "Dock", "Screen edge for the desktop dock", false),
 	"dock-icon-size":    n(48, 32, 80, 4, "Icon Size", "Overview", "Dock", "Size of dock icons in pixels", false),
 	"dock-running-dots": b(true, "Running Dots", "Overview", "Dock", "A dot under apps that are open", true),
 	"media-controls":    b(true, "Media Controls", "Overview", "Calendar", "Show what's playing above the notifications", false),

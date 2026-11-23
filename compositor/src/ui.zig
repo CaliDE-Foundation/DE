@@ -74,7 +74,11 @@ pub fn roundedRect(width: f32, height: f32, radius: f32, color: u32) *c.ClutterA
 
 /// High contrast: faint white fills (buttons, cards, toggles) get much
 /// stronger and dark surfaces turn solid black, so edges are easy to see.
-pub fn contrast(rgba: u32) u32 {
+pub fn contrast(color: u32) u32 {
+    // Theme: the stock surface grays become the chosen menu color.
+    var rgba = color;
+    const rgb = color >> 8;
+    if (rgb == 0x2e2e32 or rgb == 0x2a2a2a) rgba = (@import("config.zig").surface_rgb << 8) | (color & 0xff);
     if (!@import("config.zig").high_contrast) return rgba;
     const r = rgba >> 24;
     const g = (rgba >> 16) & 0xff;

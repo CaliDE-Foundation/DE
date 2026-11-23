@@ -25,6 +25,10 @@ pub var app_folders = true;
 pub var dock_icon_size: f32 = 48;
 pub var dock_running_dots = true;
 pub var media_controls = true;
+pub const DockMode = enum { overview, always, autohide };
+pub const DockPosition = enum { bottom, left, right };
+pub var dock_mode: DockMode = .overview;
+pub var dock_position: DockPosition = .bottom;
 
 // ---- Windows
 pub const OpenAnimation = enum { scale, fade, slide, none };
@@ -51,6 +55,17 @@ pub var tiling_column: f32 = 0.5;
 pub var alt_tab_windows = false;
 pub var alt_tab_current_workspace = true;
 pub var notifications_top_right = false;
+
+// ---- Colors (0xRRGGBB)
+pub var surface_rgb: u32 = 0x2e2e32;
+pub var panel_rgb: u32 = 0x000000;
+
+/// Parses "#rrggbb" (or "rrggbb").
+pub fn parseHex(text: []const u8) ?u32 {
+    const t = if (text.len > 0 and text[0] == '#') text[1..] else text;
+    if (t.len != 6) return null;
+    return std.fmt.parseInt(u32, t, 16) catch null;
+}
 
 // ---- Accessibility
 pub var high_contrast = false;
