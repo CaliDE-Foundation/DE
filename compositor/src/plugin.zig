@@ -130,6 +130,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     statusmenu.init(d, stage, panel);
     @import("panelitems.zig").init(panel);
     @import("deskdock.zig").init(d, stage);
+    @import("gestures.zig").init(d, stage);
     calendar.init(stage, clock);
     switcher.init(d, stage);
     notifications.init(stage);
@@ -356,6 +357,7 @@ pub fn restyle() void {
     @import("deskdock.zig").rebuild();
     tiling.retileAll();
     @import("a11y.zig").update();
+    @import("media.zig").updateTopBar();
 }
 var stage_actor: ?*c.ClutterActor = null;
 

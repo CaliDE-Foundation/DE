@@ -130,6 +130,7 @@ var Schema = map[string]Setting{
 	"clock-24h":               b(true, "24-Hour Clock", "Top Bar", "Clock", "Off shows 5:30 PM", false),
 	"show-workspace-dots":     b(true, "Workspace Dots", "Top Bar", "Indicators", "The workspace indicator on the left", false),
 	"show-battery-percentage": b(false, "Battery Percentage", "Top Bar", "Indicators", "Show the charge next to the battery icon", false),
+	"media-in-top-bar":        b(false, "Now Playing", "Top Bar", "Indicators", "Show the song that's playing; click it for the controls", false),
 	"show-keyboard-indicator": b(true, "Keyboard Layout", "Top Bar", "Indicators", "Show the layout when you have more than one", true),
 
 	// ---- Overview and dock
@@ -236,8 +237,15 @@ var Schema = map[string]Setting{
 	"alt-tab-current-workspace": b(true, "Current Workspace Only", "Behavior", "Switching", "Alt+Tab only shows this workspace", true),
 	"do-not-disturb":            b(false, "Do Not Disturb", "Behavior", "Notifications", "Hide banners (they still go in the list)", false),
 	"notification-position":     choice("top-center", []string{"top-center", "top-right"}, []string{"Top Center", "Top Right"}, "Banner Position", "Behavior", "Notifications", "Where notification banners appear", true),
-	"idle-delay":                n(5.0, 0, 120, 1, "Blank Screen After", "Behavior", "Screen", "Minutes without input (0 = never)", false),
-	"lock-on-idle":              b(true, "Lock When Blank", "Behavior", "Screen", "Ask for your password after the screen blanks", false),
+	"gestures":                  b(true, "Touchpad Gestures", "Behavior", "Gestures", "Swipe with several fingers to move around", false),
+	"gesture-fingers":           choice("3", []string{"3", "4"}, []string{"Three Fingers", "Four Fingers"}, "Swipe With", "Behavior", "Gestures", "How many fingers a gesture uses", false),
+	"swipe-up": choice("overview", []string{"overview", "apps", "none"}, []string{"Overview (Again for Apps)", "App Grid", "Nothing"},
+		"Swipe Up", "Behavior", "Gestures", "", true),
+	"swipe-down": choice("close", []string{"close", "overview", "none"}, []string{"Back to the Desktop", "Overview", "Nothing"},
+		"Swipe Down", "Behavior", "Gestures", "", true),
+	"swipe-sideways": b(true, "Swipe Sideways for Workspaces", "Behavior", "Gestures", "Left and right switch workspaces", true),
+	"idle-delay":     n(5.0, 0, 120, 1, "Blank Screen After", "Behavior", "Screen", "Minutes without input (0 = never)", false),
+	"lock-on-idle":   b(true, "Lock When Blank", "Behavior", "Screen", "Ask for your password after the screen blanks", false),
 	"keyboard-layouts": {Kind: StringList, Default: []string{"us"}, Title: "Keyboard Layouts", Page: "Behavior", Group: "Keyboard",
 		Help: "xkb names separated by commas (us, de, us+dvorak); Super+Space switches"},
 }

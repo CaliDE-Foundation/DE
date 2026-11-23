@@ -90,6 +90,10 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     }
 }
 
+pub fn isOpen() bool {
+    return state == .open or state == .opening;
+}
+
 pub fn toggle() void {
     switch (state) {
         .closed => open(),

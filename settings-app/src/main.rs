@@ -29,9 +29,9 @@ const PAGES: [(&str, &str); 8] = [
 ];
 
 /// Groups in the order they appear on their page.
-const GROUP_ORDER: [&str; 26] = [
+const GROUP_ORDER: [&str; 27] = [
     "Style", "Colors", "Background", "Bar", "Clock", "Indicators", "Overview", "App Grid", "Dock", "Calendar",
-    "Animations", "Behavior", "Rules", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Notifications",
+    "Animations", "Behavior", "Rules", "Workspaces", "Layout", "Dwindle", "Scrolling", "Switching", "Gestures", "Notifications",
     "Screen", "Keyboard", "Shell", "Seeing", "Hearing", "Typing", "Pointing",
 ];
 

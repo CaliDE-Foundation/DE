@@ -50,7 +50,35 @@ const Item = struct {
     n_rows: usize = 0,
     watch: c_uint = 0,
     actor: ?*c.ClutterActor = null,
+    on_click: ?*const fn () void = null, // the shell's own items
 };
+
+const local_owner = "cali";
+
+/// The shell's own top bar items (e.g. now playing): same look, a callback
+/// instead of D-Bus.
+pub fn setLocal(id: [*:0]const u8, icon: [*:0]const u8, label: [*:0]const u8, tooltip: [*:0]const u8, on_click: *const fn () void) void {
+    const index = find(local_owner, id) orelse blk: {
+        for (&items, 0..) |*slot, i| {
+            if (slot.* != null) continue;
+            slot.* = Item{};
+            copyZ(&slot.*.?.owner, local_owner);
+            copyZ(&slot.*.?.id, id);
+            break :blk i;
+        }
+        return;
+    };
+    const item = &items[index].?;
+    copyZ(&item.icon, icon);
+    copyZ(&item.label, label);
+    copyZ(&item.tooltip, tooltip);
+    item.on_click = on_click;
+    rebuild(index);
+}
+
+pub fn removeLocal(id: [*:0]const u8) void {
+    if (find(local_owner, id)) |i| remove(i);
+}
 
 var items: [max_items]?Item = .{null} ** max_items;
 var connection: ?*c.GDBusConnection = null;
@@ -220,6 +248,10 @@ fn emit(index: usize, row: i32) void {
 fn onClicked(actor: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv(.C) c.gboolean {
     const index = @intFromPtr(data) - 1;
     const item = &(items[index] orelse return 1);
+    if (item.on_click) |f| {
+        f();
+        return 1;
+    }
     if (item.n_rows == 0) {
         emit(index, -1);
         return 1;

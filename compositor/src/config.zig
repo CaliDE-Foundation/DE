@@ -25,6 +25,7 @@ pub var app_folders = true;
 pub var dock_icon_size: f32 = 48;
 pub var dock_running_dots = true;
 pub var media_controls = true;
+pub var media_top_bar = false;
 pub const DockMode = enum { overview, always, autohide };
 pub const DockPosition = enum { bottom, left, right };
 pub var dock_mode: DockMode = .overview;
@@ -55,6 +56,12 @@ pub var tiling_column: f32 = 0.5;
 pub var alt_tab_windows = false;
 pub var alt_tab_current_workspace = true;
 pub var notifications_top_right = false;
+pub const SwipeAction = enum { overview, apps, close, none };
+pub var gestures = true;
+pub var gesture_fingers: c_uint = 3;
+pub var swipe_up: SwipeAction = .overview;
+pub var swipe_down: SwipeAction = .close;
+pub var swipe_sideways = true;
 
 // ---- Colors (0xRRGGBB)
 pub var surface_rgb: u32 = 0x2e2e32;

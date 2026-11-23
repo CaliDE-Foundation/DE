@@ -78,6 +78,7 @@ const bool_settings = [_]BoolSetting{
     .{ .name = "app-folders", .ptr = &cfg.app_folders },
     .{ .name = "dock-running-dots", .ptr = &cfg.dock_running_dots },
     .{ .name = "media-controls", .ptr = &cfg.media_controls },
+    .{ .name = "media-in-top-bar", .ptr = &cfg.media_top_bar },
     .{ .name = "wobbly-windows", .ptr = &cfg.wobbly },
     .{ .name = "dynamic-workspaces", .ptr = &cfg.dynamic_workspaces },
     .{ .name = "alt-tab-current-workspace", .ptr = &cfg.alt_tab_current_workspace },
@@ -86,6 +87,8 @@ const bool_settings = [_]BoolSetting{
     .{ .name = "reduce-motion", .ptr = &cfg.reduce_motion },
     .{ .name = "screen-reader", .ptr = &cfg.screen_reader },
     .{ .name = "focus-outlines", .ptr = &cfg.focus_outlines },
+    .{ .name = "gestures", .ptr = &cfg.gestures },
+    .{ .name = "swipe-sideways", .ptr = &cfg.swipe_sideways },
 };
 
 // Color settings, kept as text and turned into colors together.
@@ -157,6 +160,18 @@ fn applyConfig(key: []const u8, value: ?*c.GVariant) bool {
             @memcpy(color_text[i][0..n], text[0..n]);
             color_text[i][n] = 0;
             recomputeColors();
+            return true;
+        }
+        if (eql(u8, key, "gesture-fingers")) {
+            cfg.gesture_fingers = if (eql(u8, text, "4")) 4 else 3;
+            return true;
+        }
+        if (eql(u8, key, "swipe-up")) {
+            cfg.swipe_up = cfg.parseEnum(cfg.SwipeAction, text, .overview);
+            return true;
+        }
+        if (eql(u8, key, "swipe-down")) {
+            cfg.swipe_down = cfg.parseEnum(cfg.SwipeAction, text, .close);
             return true;
         }
         if (eql(u8, key, "dock-mode")) {

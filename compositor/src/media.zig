@@ -20,6 +20,7 @@ pub const State = struct {
     artist: [256]u8 = .{0} ** 256,
     art: [512]u8 = .{0} ** 512,
     output: [128]u8 = .{0} ** 128,
+    players: [1024]u8 = .{0} ** 1024, // "busname\tapp" per line
     length: i64 = 0,
     position: i64 = 0,
     playing: bool = false,
@@ -69,6 +70,7 @@ fn copyZ(dest_buf: []u8, src: [*c]const u8) void {
 fn update(tuple: ?*c.GVariant) void {
     bus.forEachEntry(tuple, &apply);
     state.updated = c.g_get_monotonic_time();
+    updateTopBar();
     @import("calendar.zig").refresh();
 }
 
@@ -87,6 +89,7 @@ fn apply(key: [:0]const u8, v: ?*c.GVariant) void {
         if (eql(u8, key, "art")) copyZ(&state.art, text);
         if (eql(u8, key, "output")) copyZ(&state.output, text);
         if (eql(u8, key, "icon")) copyZ(&state.icon, text);
+        if (eql(u8, key, "players")) copyZ(&state.players, text);
     } else if (is(v, "x")) {
         if (eql(u8, key, "length")) state.length = c.g_variant_get_int64(v);
         if (eql(u8, key, "position")) state.position = c.g_variant_get_int64(v);
@@ -165,9 +168,24 @@ pub fn card(width: f32) *c.ClutterActor {
     const tx = pad + art_size + 14;
     const tw = width - tx - pad;
     var buf: [160]u8 = undefined;
-    const source = std.fmt.bufPrintZ(&buf, "Listening from {s}", .{std.mem.sliceTo(&state.identity, 0)}) catch "Listening";
-    const from = chip(source.ptr, @ptrCast(&state.icon), (ui.accent & 0xffffff00) | 0x66, tw - 20);
+    _ = std.fmt.bufPrintZ(&buf, "Listening from {s}", .{std.mem.sliceTo(&state.identity, 0)}) catch {
+        @memcpy(buf[0..10], "Listening\x00");
+    };
+    const several = playerCount() > 1;
+    if (several) {
+        const n = std.mem.indexOfScalar(u8, &buf, 0) orelse 0;
+        if (n + 4 < buf.len) {
+            @memcpy(buf[n .. n + 4], " \u{25be}"[0..4]); // ▾: there's a choice
+            buf[n + 4] = 0;
+        }
+    }
+    const from = chip(@ptrCast(&buf), @ptrCast(&state.icon), (ui.accent & 0xffffff00) | 0x66, tw - 20);
     c.clutter_actor_set_position(from, tx, pad);
+    if (several) {
+        c.clutter_actor_set_reactive(from, 1);
+        ui.accessible(from, c.ATK_ROLE_PUSH_BUTTON, "Choose which player to control");
+        plugin.connect(from, "button-release-event", &onPickPlayer, null);
+    }
     c.clutter_actor_add_child(k, from);
 
     const title = ui.label(@ptrCast(&state.title), config.font(.bold, 3));
@@ -240,4 +258,79 @@ fn onNext(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) 
 fn onPrevious(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
     call("MediaPrevious");
     return 1;
+}
+
+// ---- Several players ---------------------------------------------------------------------
+
+fn playerCount() usize {
+    const text = std.mem.sliceTo(&state.players, 0);
+    if (text.len == 0) return 0;
+    return std.mem.count(u8, text, "\n") + 1;
+}
+
+var menu_names: [8][128]u8 = undefined;
+var menu_labels: [8][128]u8 = undefined;
+
+fn onPickPlayer(actor: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    var labels: [8][*:0]const u8 = undefined;
+    var n: usize = 0;
+    var lines = std.mem.splitScalar(u8, std.mem.sliceTo(&state.players, 0), '\n');
+    while (lines.next()) |line| {
+        if (n == labels.len) break;
+        var parts = std.mem.splitScalar(u8, line, '\t');
+        const name = parts.next() orelse continue;
+        const app = parts.next() orelse name;
+        const ln = @min(app.len, 127);
+        @memcpy(menu_labels[n][0..ln], app[0..ln]);
+        menu_labels[n][ln] = 0;
+        const nn = @min(name.len, 127);
+        @memcpy(menu_names[n][0..nn], name[0..nn]);
+        menu_names[n][nn] = 0;
+        labels[n] = @ptrCast(&menu_labels[n]);
+        n += 1;
+    }
+    var x: f32 = 0;
+    var y: f32 = 0;
+    c.clutter_actor_get_transformed_position(actor, &x, &y);
+    ui.menu(x, y + 30, labels[0..n], &onPlayerChosen);
+    return 1;
+}
+
+fn onPlayerChosen(index: usize) void {
+    bus.call(dest, path, iface, "MediaSelect", c.g_variant_new("(s)", @as([*:0]const u8, @ptrCast(&menu_names[index]))), null, null);
+    // Reopen the date menu on the new player.
+    _ = c.g_timeout_add(150, &reopen, null);
+}
+
+fn reopen(_: c.gpointer) callconv(.C) c.gboolean {
+    @import("calendar.zig").toggle();
+    return 0;
+}
+
+// ---- Top bar chip (media-in-top-bar) ------------------------------------------------------
+
+var shown_in_bar = false;
+
+/// Shows "♪ Title – Artist" in the top bar while something is playing.
+pub fn updateTopBar() void {
+    const items = @import("panelitems.zig");
+    const want = config.media_top_bar and active() and state.playing;
+    if (!want) {
+        if (shown_in_bar) items.removeLocal("media");
+        shown_in_bar = false;
+        return;
+    }
+    var buf: [200]u8 = undefined;
+    const artist = std.mem.sliceTo(&state.artist, 0);
+    const title = std.mem.sliceTo(&state.title, 0);
+    const text = (if (artist.len > 0)
+        std.fmt.bufPrintZ(&buf, "{s} \u{2013} {s}", .{ title[0..@min(title.len, 40)], artist[0..@min(artist.len, 30)] })
+    else
+        std.fmt.bufPrintZ(&buf, "{s}", .{title[0..@min(title.len, 60)]})) catch return;
+    items.setLocal("media", "audio-x-generic-symbolic", text.ptr, "Now playing", &openCalendar);
+    shown_in_bar = true;
+}
+
+fn openCalendar() void {
+    @import("calendar.zig").toggle();
 }

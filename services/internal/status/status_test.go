@@ -132,6 +132,16 @@ func TestArtLocationAndDescription(t *testing.T) {
 	}
 }
 
+func TestPickPreferred(t *testing.T) {
+	players := []PlayerState{{Name: "a", Status: "Paused"}, {Name: "b", Status: "Playing"}}
+	if got := PickPreferred(players, "a"); got != "a" {
+		t.Errorf("chosen player should win, got %q", got)
+	}
+	if got := PickPreferred(players, "gone"); got != "b" {
+		t.Errorf("without the chosen one, the playing one, got %q", got)
+	}
+}
+
 func TestAppIcon(t *testing.T) {
 	dir := t.TempDir()
 	apps := filepath.Join(dir, "applications")

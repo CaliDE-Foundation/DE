@@ -55,6 +55,7 @@ const introspection = `<node>
     <method name="MediaNext"/>
     <method name="MediaPrevious"/>
     <method name="MediaSeek"><arg direction="in" type="x" name="position"/></method>
+    <method name="MediaSelect"><arg direction="in" type="s" name="player"/></method>
     <signal name="MediaChanged"><arg type="a{sv}"/></signal>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
@@ -71,6 +72,7 @@ type server struct {
 	fakeNets    []status.WifiNetwork
 	fakeDevices []status.BluetoothDevice
 	fakeMedia   status.Media
+	preferred   string // the player picked in the media card
 
 	media status.Media
 }
@@ -341,11 +343,24 @@ func (s *server) readMedia() status.Media {
 		defer s.mu.Unlock()
 		return s.fakeMedia
 	}
-	name := status.PickPlayer(s.players())
+	all := s.players()
+	s.mu.Lock()
+	preferred := s.preferred
+	s.mu.Unlock()
+	name := status.PickPreferred(all, preferred)
 	if name == "" {
 		return status.Media{}
 	}
 	m := status.Media{Player: name}
+	var list []string
+	for _, p := range all {
+		id, _ := prop[string](s.session, p.Name, mprisPath, "org.mpris.MediaPlayer2.Identity")
+		if id == "" {
+			id = strings.TrimPrefix(p.Name, mprisPrefix)
+		}
+		list = append(list, p.Name+"\t"+id)
+	}
+	m.Players = strings.Join(list, "\n")
 	m.Identity, _ = prop[string](s.session, name, mprisPath, "org.mpris.MediaPlayer2.Identity")
 	entry, _ := prop[string](s.session, name, mprisPath, "org.mpris.MediaPlayer2.DesktopEntry")
 	m.Icon = status.AppIcon(entry, status.DataDirs())
@@ -450,6 +465,22 @@ func (s *server) mediaCall(method string, args ...any) *dbus.Error {
 		}
 		s.session.Object(player, mprisPath).Call("org.mpris.MediaPlayer2.Player."+method, 0, args...)
 	}
+	s.refreshMedia()
+	return nil
+}
+
+// MediaSelect makes the media card follow one player (from its menu).
+func (s *server) MediaSelect(player string) *dbus.Error {
+	s.mu.Lock()
+	s.preferred = player
+	if s.fake {
+		for _, line := range strings.Split(s.fakeMedia.Players, "\n") {
+			if name, id, ok := strings.Cut(line, "\t"); ok && name == player {
+				s.fakeMedia.Player, s.fakeMedia.Identity = name, id
+			}
+		}
+	}
+	s.mu.Unlock()
 	s.refreshMedia()
 	return nil
 }
@@ -656,6 +687,7 @@ func main() {
 			Position: envMicros("CALI_STATUS_FAKE_POSITION", 322_000_000),
 			Playing:  true,
 			Output:   envOr("CALI_STATUS_FAKE_OUTPUT", "Arctis Nova Pro Wireless")}
+		s.fakeMedia.Players = "org.mpris.MediaPlayer2.fake\t" + s.fakeMedia.Identity + "\norg.mpris.MediaPlayer2.fake2\tVideos"
 		log.Printf("cali-statusd: fake hardware (CALI_STATUS_FAKE=1)")
 	}
 	if system, err := dbus.ConnectSystemBus(); err == nil {

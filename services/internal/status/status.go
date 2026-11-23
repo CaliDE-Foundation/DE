@@ -242,6 +242,7 @@ type Media struct {
 	Playing  bool
 	Output   string // audio output name, e.g. "Arctis Nova Pro"
 	Icon     string // the app's icon: a file path, or an icon name
+	Players  string // every player, one "busname<TAB>app name" per line
 }
 
 // Map converts media to D-Bus friendly values.
@@ -249,7 +250,7 @@ func (m Media) Map() map[string]any {
 	return map[string]any{
 		"player": m.Player, "identity": m.Identity, "title": m.Title, "artist": m.Artist,
 		"art": m.ArtPath, "length": m.Length, "position": m.Position, "playing": m.Playing,
-		"output": m.Output, "icon": m.Icon,
+		"output": m.Output, "icon": m.Icon, "players": m.Players,
 	}
 }
 
@@ -273,6 +274,17 @@ func PickPlayer(players []PlayerState) string {
 		return players[0].Name
 	}
 	return ""
+}
+
+// PickPreferred returns preferred if it's still around (the user chose it
+// in the media card), otherwise PickPlayer's choice.
+func PickPreferred(players []PlayerState, preferred string) string {
+	for _, p := range players {
+		if p.Name == preferred {
+			return p.Name
+		}
+	}
+	return PickPlayer(players)
 }
 
 // ArtLocation splits an MPRIS art URL into a local path or a URL to fetch.
