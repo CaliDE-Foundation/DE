@@ -128,6 +128,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     overview.init(d, stage, panel);
     workspaces.init(d, stage, panel);
     statusmenu.init(d, stage, panel);
+    @import("panelitems.zig").init(panel);
     calendar.init(stage, clock);
     switcher.init(d, stage);
     notifications.init(stage);
@@ -362,6 +363,11 @@ pub fn setClockDot(visible: bool) void {
     placeClockDot();
 }
 
+/// Re-places the clock (top bar items appeared or went away).
+pub fn restyleClock() void {
+    placeClockDot();
+}
+
 fn placeClockDot() void {
     const dot = clock_dot orelse return;
     const text = clock orelse return;
@@ -377,7 +383,7 @@ fn placeClockDot() void {
         const shift: f32 = switch (config.clock_position) {
             .center => 0,
             .left => workspaces.indicatorWidth() + 32,
-            .right => -(statusmenu.iconsWidth() + 32),
+            .right => -(statusmenu.iconsWidth() + @import("panelitems.zig").width() + 32),
         };
         c.clutter_actor_set_translation(text, shift, 0, 0);
     }

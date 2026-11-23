@@ -96,6 +96,7 @@ fn refreshIcons() void {
     if (std.mem.eql(?[*:0]const u8, &names, &shown_icons) and std.mem.eql(u8, &layout_buf, &shown_layout)) return;
     shown_icons = names;
     shown_layout = layout_buf;
+    defer @import("panelitems.zig").relayout();
 
     c.clutter_actor_destroy_all_children(box);
     shown_percent = -1;

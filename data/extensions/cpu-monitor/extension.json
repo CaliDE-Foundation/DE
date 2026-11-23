@@ -1,0 +1,14 @@
+{
+  "id": "cpu-monitor",
+  "name": "CPU Monitor",
+  "description": "Shows how busy your processor is in the top bar.",
+  "version": "1.0",
+  "author": "CaliDE Foundation",
+  "exec": "cpu-monitor.py",
+  "settings": [
+    {"key": "interval", "kind": "number", "default": 2, "min": 1, "max": 30, "step": 1,
+     "title": "Update Every", "help": "Seconds between updates"},
+    {"key": "style", "kind": "string", "default": "both", "choices": ["both", "text", "icon"],
+     "labels": ["Icon and Percentage", "Percentage Only", "Icon Only"], "title": "Show"}
+  ]
+}

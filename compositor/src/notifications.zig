@@ -126,6 +126,8 @@ pub fn init(s: ?*c.ClutterActor) void {
 
 fn onBusAcquired(conn: ?*c.GDBusConnection, _: [*c]const u8, _: c.gpointer) callconv(.C) void {
     connection = conn;
+    @import("panelitems.zig").register(conn);
+    @import("bus.zig").spawnSibling("cali-extd");
     var err: ?*c.GError = null;
     const node = c.g_dbus_node_info_new_for_xml(introspection, @ptrCast(&err)) orelse {
         if (err) |e| c.g_error_free(e);

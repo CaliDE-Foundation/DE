@@ -17,7 +17,7 @@ BuildRequires:  cargo rust go make gcc pkgconfig(libsookie-52)
 BuildRequires:  pkgconfig(gtk4) pkgconfig(libadwaita-1)
 Requires:       sookie dbus-daemon pam pipewire wireplumber
 Requires:       xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk
-Recommends:     NetworkManager bluez upower mate-polkit orca
+Recommends:     NetworkManager bluez upower mate-polkit orca python3-gobject
 
 %description
 Cali is a Linux desktop environment that keeps GNOME's simplicity, smooth
@@ -42,6 +42,7 @@ make install PREFIX=%{_prefix} SYSCONFDIR=%{_sysconfdir} DESTDIR=%{buildroot}
 %{_datadir}/xdg-desktop-portal/cali-portals.conf
 %{_datadir}/applications/org.calide.Settings.desktop
 %{_datadir}/icons/hicolor/scalable/apps/org.calide.Settings.svg
+%{_datadir}/cali/
 %config(noreplace) %{_sysconfdir}/pam.d/cali-lock
 
 %changelog

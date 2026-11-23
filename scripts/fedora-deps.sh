@@ -35,6 +35,7 @@ if [ "${1:-}" = "--desktop" ]; then
     mesa-dri-drivers mesa-libEGL mesa-vulkan-drivers \
     adwaita-sans-fonts adwaita-icon-theme gnome-text-editor \
     gtk4-devel libadwaita-devel \
-    xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk dconf
+    xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk dconf \
+    python3-gobject
   dnf clean all
 fi

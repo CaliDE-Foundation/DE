@@ -119,7 +119,7 @@ PREFIX     ?= /usr/local
 SYSCONFDIR ?= /etc
 BINDIR     := $(DESTDIR)$(PREFIX)/bin
 DATADIR    := $(DESTDIR)$(PREFIX)/share
-BINARIES   := cali-compositor cali-settingsd cali-statusd cali-notifyd calictl
+BINARIES   := cali-compositor cali-settingsd cali-statusd cali-notifyd cali-extd calictl
 
 install:
 	@for b in $(BINARIES); do test -x $(OUT)/$$b || { echo "install: $(OUT)/$$b missing; run make compositor-sookie services first"; exit 1; }; done
@@ -133,6 +133,8 @@ install:
 	install -Dm644 data/pam/cali-lock $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock
 	install -Dm644 data/org.calide.Settings.desktop $(DATADIR)/applications/org.calide.Settings.desktop
 	install -Dm644 data/icons/org.calide.Settings.svg $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
+	cd data/extensions && for f in $$(find . -type f); do \
+	  install -Dm$$(test -x $$f && echo 755 || echo 644) $$f $(DATADIR)/cali/extensions/$$f; done
 	[ -n "$(DESTDIR)" ] || glib-compile-schemas $(DATADIR)/glib-2.0/schemas
 
 uninstall:
@@ -140,6 +142,9 @@ uninstall:
 	rm -f $(DATADIR)/wayland-sessions/cali.desktop $(DATADIR)/glib-2.0/schemas/10_calide.gschema.override \
 	  $(DATADIR)/xdg-desktop-portal/cali-portals.conf $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock \
 	  $(DATADIR)/applications/org.calide.Settings.desktop $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
+	cd data/extensions && for f in $$(find . -type f); do rm -f $(DATADIR)/cali/extensions/$$f; done
+	-cd data/extensions && for d in $$(find . -mindepth 1 -type d); do rmdir $(DATADIR)/cali/extensions/$$d; done
+	-rmdir $(DATADIR)/cali/extensions $(DATADIR)/cali
 
 # ---- Checks -----------------------------------------------------------------
 

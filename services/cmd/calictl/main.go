@@ -2,8 +2,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 
@@ -20,6 +23,10 @@ commands:
   reset KEY          go back to the default
   export [FILE]      save your whole setup (stdout without FILE)
   import FILE        load a setup; settings it leaves out go back to defaults
+  ext list           show installed extensions
+  ext install SRC    install from a folder, .zip, .tar.gz or https:// link
+  ext on|off ID      turn an extension on or off
+  ext remove ID      uninstall an extension
   version            print the version
   config-path        print the settings file location
 
@@ -157,8 +164,79 @@ func main() {
 			fail("%v", err)
 		}
 		fmt.Printf("imported %d settings\n", n)
+	case "ext":
+		extCommand(args)
 	default:
 		fmt.Fprintf(os.Stderr, "calictl: unknown command %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)
+	}
+}
+
+// extCommand talks to cali-extd (org.calide.Extensions).
+func extCommand(args []string) {
+	if len(args) == 0 {
+		fail("usage: calictl ext list|install SRC|on ID|off ID|remove ID")
+	}
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		fail("%v", err)
+	}
+	obj := conn.Object("org.calide.Extensions", "/org/calide/Extensions")
+	need := func(n int) {
+		if len(args) != n {
+			fail("usage: calictl ext %s ID", args[0])
+		}
+	}
+	switch args[0] {
+	case "list":
+		var text string
+		if err := obj.Call("org.calide.Extensions.List", 0).Store(&text); err != nil {
+			fail("is Cali running? %v", err)
+		}
+		var items []struct {
+			ID, Name, Version, Error string
+			Enabled, Running, System bool
+		}
+		if err := json.Unmarshal([]byte(text), &items); err != nil {
+			fail("%v", err)
+		}
+		for _, it := range items {
+			state := "off"
+			if it.Enabled {
+				state = "on"
+			}
+			if it.Running {
+				state += ", running"
+			}
+			if it.Error != "" {
+				state += ", " + it.Error
+			}
+			fmt.Printf("%-24s %-28s %s (%s)\n", it.ID, it.Name, it.Version, state)
+		}
+	case "install":
+		need(2)
+		src := args[1]
+		if !strings.Contains(src, "://") {
+			if abs, err := filepath.Abs(src); err == nil {
+				src = abs
+			}
+		}
+		var id string
+		if err := obj.Call("org.calide.Extensions.Install", 0, src).Store(&id); err != nil {
+			fail("%v", err)
+		}
+		fmt.Printf("installed %s (turn it on with: calictl ext on %s)\n", id, id)
+	case "on", "off":
+		need(2)
+		if err := obj.Call("org.calide.Extensions.SetEnabled", 0, args[1], args[0] == "on").Err; err != nil {
+			fail("%v", err)
+		}
+	case "remove":
+		need(2)
+		if err := obj.Call("org.calide.Extensions.Remove", 0, args[1]).Err; err != nil {
+			fail("%v", err)
+		}
+	default:
+		fail("unknown ext command %q", args[0])
 	}
 }

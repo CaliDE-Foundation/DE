@@ -56,6 +56,7 @@ calide
 sookie
 gdm
 mate-polkit
+python3-gobject
 orca
 gnome-keyring
 gnome-control-center
