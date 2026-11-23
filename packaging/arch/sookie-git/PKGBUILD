@@ -21,9 +21,15 @@ pkgver() {
   printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
+prepare() {
+  # arch-meson doesn't download, so fetch Mutter's subprojects (gvdb) here.
+  cd Sookie
+  meson subprojects download
+}
+
 build() {
   arch-meson Sookie build -D tests=disabled -D mutter_tests=false -D clutter_tests=false \
-    -D cogl_tests=false -D installed_tests=false
+    -D cogl_tests=false -D installed_tests=false -D profiler=false
   meson compile -C build
 }
 
