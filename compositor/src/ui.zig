@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const c = @import("plugin.zig").c;
+const config = @import("config.zig");
 
 /// Textures are rendered at this multiple of their logical size so they stay
 /// sharp when scaled.
@@ -252,7 +253,7 @@ pub fn menu(x: f32, y: f32, labels: []const [*:0]const u8, callback: MenuCallbac
     const pad: f32 = 6;
     var w: f32 = 160;
     for (labels) |l| {
-        const probe = label(l, "Adwaita Sans 11");
+        const probe = label(l, config.font(.regular, 0));
         w = @max(w, preferredWidth(probe) + 40);
         c.clutter_actor_destroy(probe);
     }
@@ -261,7 +262,7 @@ pub fn menu(x: f32, y: f32, labels: []const [*:0]const u8, callback: MenuCallbac
     var sh: f32 = 0;
     c.clutter_actor_get_size(s, &sw, &sh);
 
-    const card = roundedRect(w, h, 14, 0x2e2e32f8);
+    const card = roundedRect(w, h, config.radius(0.8), 0x2e2e32f8);
     c.clutter_actor_set_position(card, @min(x, sw - w - 4), @min(y, sh - h - 4));
     for (labels, 0..) |l, i| {
         const row = c.clutter_actor_new();
@@ -270,7 +271,7 @@ pub fn menu(x: f32, y: f32, labels: []const [*:0]const u8, callback: MenuCallbac
         const hover = roundedRect(w - 2 * pad, row_h, 9, 0xffffff1f);
         c.clutter_actor_set_opacity(hover, 0);
         c.clutter_actor_add_child(row, hover);
-        const text = label(l, "Adwaita Sans 11");
+        const text = label(l, config.font(.regular, 0));
         c.clutter_actor_set_x(text, 14);
         center(text, row, c.CLUTTER_ALIGN_Y_AXIS);
         c.clutter_actor_add_child(row, text);
@@ -312,4 +313,18 @@ pub fn eventPosition(event: ?*c.ClutterEvent) [2]f32 {
 /// Right mouse button?
 pub fn isSecondary(event: ?*c.ClutterEvent) bool {
     return c.clutter_event_get_button(event) == 3;
+}
+
+/// An actor showing an image file (PNG/JPEG via cali-shell; SVG through the
+/// icon loader), `size` x `size`, keeping its aspect ratio.
+pub fn image(path: [*:0]const u8, size: f32) *c.ClutterActor {
+    var w: c_uint = 0;
+    var h: c_uint = 0;
+    if (c.cali_shell_load_image(path, &w, &h)) |pixels| {
+        defer c.cali_shell_free_image(pixels, @as(usize, w) * h * 4);
+        const actor = withContent(size, size, contentFromPixels(@intCast(w), @intCast(h), pixels));
+        c.clutter_actor_set_content_gravity(actor, @intCast(c.CLUTTER_CONTENT_GRAVITY_RESIZE_ASPECT));
+        return actor;
+    }
+    return icon(path, size, false, 0);
 }

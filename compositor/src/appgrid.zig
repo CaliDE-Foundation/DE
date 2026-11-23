@@ -7,6 +7,7 @@ const dock = @import("dock.zig");
 const overview = @import("overview.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const max_results = 256;
 const cell_w: f32 = 132;
@@ -34,7 +35,7 @@ pub fn show(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, area: c.CaliRect, quer
     grid_area = area;
     if (query != null) open_folder = null;
     collect(query);
-    if (query == null) groupIntoFolders();
+    if (query == null and config.app_folders) groupIntoFolders() else n_folders = 0;
 
     const g = c.clutter_actor_new();
     c.clutter_actor_set_position(g, area.x, area.y);
@@ -50,7 +51,7 @@ pub fn show(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, area: c.CaliRect, quer
     const left = (area.width - @as(f32, @floatFromInt(used_cols)) * cell_w) / 2;
 
     if (shown == 0 and query != null) {
-        const none = ui.label("No results", "Adwaita Sans Bold 14");
+        const none = ui.label("No results", config.font(.bold, 3));
         c.clutter_actor_set_opacity(none, 180);
         ui.center(none, g, c.CLUTTER_ALIGN_X_AXIS);
         c.clutter_actor_set_y(none, 40);
@@ -61,7 +62,7 @@ pub fn show(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, area: c.CaliRect, quer
         const back = ui.iconButton("go-previous-symbolic", 32, &onFolderBack, null);
         c.clutter_actor_set_position(back, left, 0);
         c.clutter_actor_add_child(g, back);
-        const title = ui.label(name, "Adwaita Sans Bold 14");
+        const title = ui.label(name, config.font(.bold, 3));
         c.clutter_actor_set_position(title, left + 44, (32 - ui.preferredHeight(title)) / 2);
         c.clutter_actor_add_child(g, title);
     }
@@ -169,7 +170,7 @@ fn makeFolderCell(f: *Folder) *c.ClutterActor {
         c.g_object_unref(info);
     }
     c.clutter_actor_add_child(cell, tile);
-    const label = ui.label(f.name, "Adwaita Sans 10");
+    const label = ui.label(f.name, config.font(.regular, -1));
     c.clutter_actor_set_position(label, (cell_w - ui.preferredWidth(label)) / 2, 14 + icon_size + 10);
     c.clutter_actor_add_child(cell, label);
     plugin.connect(cell, "button-release-event", &onFolderClicked, @constCast(@ptrCast(f.name)));
@@ -230,7 +231,7 @@ fn makeCell(info: *c.GAppInfo, highlighted: bool, index: usize) *c.ClutterActor 
     c.clutter_actor_set_position(icon, (cell_w - icon_size) / 2, 14);
     c.clutter_actor_add_child(cell, icon);
 
-    const label = ui.label(c.g_app_info_get_name(info), "Adwaita Sans 10");
+    const label = ui.label(c.g_app_info_get_name(info), config.font(.regular, -1));
     const lw = @min(ui.preferredWidth(label), cell_w - 14);
     c.clutter_actor_set_width(label, lw);
     c.clutter_actor_set_position(label, (cell_w - lw) / 2, 14 + icon_size + 10);

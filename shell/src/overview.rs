@@ -17,6 +17,11 @@ pub const GAP: f32 = 32.0;
 /// each window's aspect ratio and never enlarging it. Tries every row count
 /// and keeps the one that shows the windows biggest, like GNOME's overview.
 pub fn layout(area: CaliRect, windows: &[CaliRect]) -> Vec<CaliRect> {
+    layout_with_gap(area, windows, GAP)
+}
+
+/// Like `layout`, with a custom space between windows.
+pub fn layout_with_gap(area: CaliRect, windows: &[CaliRect], gap: f32) -> Vec<CaliRect> {
     let n = windows.len();
     if n == 0 || area.width <= 0.0 || area.height <= 0.0 {
         return Vec::new();
@@ -30,7 +35,7 @@ pub fn layout(area: CaliRect, windows: &[CaliRect]) -> Vec<CaliRect> {
         if (rows - 1) * cols >= n {
             continue; // would leave an empty row
         }
-        let (slot_w, slot_h) = slot_size(area, rows, cols);
+        let (slot_w, slot_h) = slot_size(area, rows, cols, gap);
         if slot_w <= 0.0 || slot_h <= 0.0 {
             continue;
         }
@@ -50,8 +55,8 @@ pub fn layout(area: CaliRect, windows: &[CaliRect]) -> Vec<CaliRect> {
     let Some((_, rows, cols)) = best else {
         return Vec::new();
     };
-    let (slot_w, slot_h) = slot_size(area, rows, cols);
-    let grid_h = rows as f32 * slot_h + (rows - 1) as f32 * GAP;
+    let (slot_w, slot_h) = slot_size(area, rows, cols, gap);
+    let grid_h = rows as f32 * slot_h + (rows - 1) as f32 * gap;
     let top = area.y + (area.height - grid_h) / 2.0;
 
     windows
@@ -60,14 +65,14 @@ pub fn layout(area: CaliRect, windows: &[CaliRect]) -> Vec<CaliRect> {
         .map(|(i, w)| {
             let (row, col) = (i / cols, i % cols);
             let in_row = cols.min(n - row * cols);
-            let row_w = in_row as f32 * slot_w + (in_row - 1) as f32 * GAP;
+            let row_w = in_row as f32 * slot_w + (in_row - 1) as f32 * gap;
             let left = area.x + (area.width - row_w) / 2.0;
 
             let (ww, wh) = size(w);
             let s = (slot_w / ww).min(slot_h / wh).min(1.0);
             let (width, height) = (ww * s, wh * s);
-            let slot_x = left + col as f32 * (slot_w + GAP);
-            let slot_y = top + row as f32 * (slot_h + GAP);
+            let slot_x = left + col as f32 * (slot_w + gap);
+            let slot_y = top + row as f32 * (slot_h + gap);
             CaliRect {
                 x: slot_x + (slot_w - width) / 2.0,
                 y: slot_y + (slot_h - height) / 2.0,
@@ -78,10 +83,10 @@ pub fn layout(area: CaliRect, windows: &[CaliRect]) -> Vec<CaliRect> {
         .collect()
 }
 
-fn slot_size(area: CaliRect, rows: usize, cols: usize) -> (f32, f32) {
+fn slot_size(area: CaliRect, rows: usize, cols: usize, gap: f32) -> (f32, f32) {
     (
-        (area.width - (cols - 1) as f32 * GAP) / cols as f32,
-        (area.height - (rows - 1) as f32 * GAP) / rows as f32,
+        (area.width - (cols - 1) as f32 * gap) / cols as f32,
+        (area.height - (rows - 1) as f32 * gap) / rows as f32,
     )
 }
 

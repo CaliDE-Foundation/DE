@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -100,5 +101,41 @@ func TestBadLinesAreSkipped(t *testing.T) {
 	}
 	if v, _ := st.Get("hot-corner"); v != true {
 		t.Errorf("invalid line should fall back to default, got %v", v)
+	}
+}
+
+func TestSchemaMetadata(t *testing.T) {
+	for _, k := range Keys() {
+		st := Schema[k]
+		if st.Title == "" || st.Page == "" || st.Group == "" {
+			t.Errorf("%s is missing its title, page or group", k)
+		}
+		if st.Choices != nil && st.Labels != nil && len(st.Choices) != len(st.Labels) {
+			t.Errorf("%s has %d choices but %d labels", k, len(st.Choices), len(st.Labels))
+		}
+		if st.Kind == Number && st.Step <= 0 {
+			t.Errorf("%s needs a step", k)
+		}
+	}
+	if len(Schema) < 45 {
+		t.Errorf("expected the big list, got %d settings", len(Schema))
+	}
+	if !strings.Contains(SchemaJSON(), `"key":"tiling-mode"`) {
+		t.Error("SchemaJSON should list tiling-mode")
+	}
+}
+
+func TestGSettingsValue(t *testing.T) {
+	if s, k, v, ok := GSettingsValue("focus-mode", "sloppy"); !ok || s != "org.gnome.desktop.wm.preferences" || k != "focus-mode" || v != "'sloppy'" {
+		t.Errorf("focus-mode: %s %s %s %v", s, k, v, ok)
+	}
+	if _, _, v, ok := GSettingsValue("workspace-count", 6.0); !ok || v != "6" {
+		t.Errorf("workspace-count: %s %v", v, ok)
+	}
+	if _, _, v, ok := GSettingsValue("edge-tiling", false); !ok || v != "false" {
+		t.Errorf("edge-tiling: %s %v", v, ok)
+	}
+	if _, _, _, ok := GSettingsValue("accent-color", "blue"); ok {
+		t.Error("accent-color is Cali-only")
 	}
 }

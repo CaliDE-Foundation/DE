@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Cali
+Comment=A desktop that feels like GNOME and lets you make it yours
+Exec=cali-session
+TryExec=cali-session
+Type=Application
+DesktopNames=Cali

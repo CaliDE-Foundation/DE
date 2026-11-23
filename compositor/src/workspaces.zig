@@ -5,6 +5,7 @@ const std = @import("std");
 const plugin = @import("plugin.zig");
 const overview = @import("overview.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const max_workspaces = 36;
 const dot_ms = 250;
@@ -33,7 +34,7 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     c.clutter_box_layout_set_spacing(@ptrCast(@alignCast(layout)), @intFromFloat(style.spacing));
     c.clutter_actor_set_layout_manager(box, layout);
     c.clutter_actor_set_position(box, indicator_x, 0);
-    c.clutter_actor_set_height(box, @floatFromInt(c.cali_shell_panel_height()));
+    c.clutter_actor_set_height(box, @floatFromInt(@import("config.zig").panelHeight()));
     c.clutter_actor_set_reactive(box, 1);
     c.clutter_actor_add_child(p, box);
     plugin.connect(box, "button-release-event", &onIndicatorClicked, null);
@@ -200,8 +201,24 @@ fn hasAppWindows(workspace: ?*c.MetaWorkspace) bool {
     return false;
 }
 
+/// Re-applies the bar height and the workspace-dots setting.
+pub fn restyle() void {
+    const box = indicator orelse return;
+    c.clutter_actor_set_height(box, @floatFromInt(config.panelHeight()));
+    if (config.show_workspace_dots) c.clutter_actor_show(box) else c.clutter_actor_hide(box);
+}
+
+/// Width of the dots (0 when hidden), for placing the clock after them.
+pub fn indicatorWidth() f32 {
+    const box = indicator orelse return 0;
+    if (!config.show_workspace_dots) return 0;
+    return indicator_x + @import("ui.zig").preferredWidth(box);
+}
+
 fn runCheck(_: c.gpointer) callconv(.C) c.gboolean {
     check_pending = false;
+    // Fixed workspaces (dynamic-workspaces off): Sookie keeps the count.
+    if (!config.dynamic_workspaces) return 0;
     const d = display orelse return 0;
     const manager = c.meta_display_get_workspace_manager(d);
     const n: usize = @intCast(@min(c.meta_workspace_manager_get_n_workspaces(manager), max_workspaces));

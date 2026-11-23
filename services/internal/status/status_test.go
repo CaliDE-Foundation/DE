@@ -1,6 +1,10 @@
 package status
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestNetworkState(t *testing.T) {
 	cases := []struct {
@@ -96,5 +100,63 @@ func TestSSIDAndIcons(t *testing.T) {
 	st, nets, devs := Fake()
 	if !st.WifiAvailable || len(nets) == 0 || !nets[0].Active || len(devs) == 0 {
 		t.Error("Fake data should describe a connected laptop")
+	}
+}
+
+func TestPickPlayer(t *testing.T) {
+	ps := []PlayerState{{"a", "Stopped"}, {"b", "Paused"}, {"c", "Playing"}}
+	if got := PickPlayer(ps); got != "c" {
+		t.Errorf("playing first: %s", got)
+	}
+	if got := PickPlayer(ps[:2]); got != "b" {
+		t.Errorf("then paused: %s", got)
+	}
+	if got := PickPlayer(nil); got != "" {
+		t.Errorf("none: %s", got)
+	}
+}
+
+func TestArtLocationAndDescription(t *testing.T) {
+	if p, r := ArtLocation("file:///home/me/My%20Music/cover.jpg"); p != "/home/me/My Music/cover.jpg" || r != "" {
+		t.Errorf("file url: %q %q", p, r)
+	}
+	if p, r := ArtLocation("https://i.scdn.co/image/abc"); p != "" || r != "https://i.scdn.co/image/abc" {
+		t.Errorf("web url: %q %q", p, r)
+	}
+	if p, r := ArtLocation("data:image/png;base64,xyz"); p != "" || r != "" {
+		t.Errorf("unsupported: %q %q", p, r)
+	}
+	out := "id 52, type PipeWire:Interface:Node\n    alsa.card = \"2\"\n  * node.description = \"Arctis Nova Pro Wireless\"\n  * node.name = \"alsa_output.usb\"\n"
+	if d := NodeDescription(out); d != "Arctis Nova Pro Wireless" {
+		t.Errorf("description: %q", d)
+	}
+}
+
+func TestAppIcon(t *testing.T) {
+	dir := t.TempDir()
+	apps := filepath.Join(dir, "applications")
+	icons := filepath.Join(dir, "icons", "hicolor", "scalable", "apps")
+	if err := os.MkdirAll(apps, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(icons, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	desktop := "[Desktop Entry]\nName=Spotify\nIcon=com.spotify.Client\n[Desktop Action x]\nIcon=other\n"
+	if err := os.WriteFile(filepath.Join(apps, "com.spotify.Client.desktop"), []byte(desktop), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svg := filepath.Join(icons, "com.spotify.Client.svg")
+	if err := os.WriteFile(svg, []byte("<svg/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := AppIcon("spotify", []string{dir}); got != svg {
+		t.Errorf("AppIcon(spotify) = %q, want %q", got, svg)
+	}
+	if got := AppIcon("firefox", []string{dir}); got != "firefox" {
+		t.Errorf("unknown app should fall back to its name, got %q", got)
+	}
+	if got := AppIcon("", []string{dir}); got != "" {
+		t.Errorf("no entry should give no icon, got %q", got)
 	}
 }

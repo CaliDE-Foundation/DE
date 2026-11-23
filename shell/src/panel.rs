@@ -1,6 +1,6 @@
 //! The top bar: what it shows. The compositor (Zig) draws it.
 
-use std::ffi::{c_char, c_int, c_long, CStr};
+use std::ffi::{c_char, c_int, c_long, CStr, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Bar height in logical pixels.
@@ -8,6 +8,8 @@ pub const HEIGHT: u32 = 32;
 
 static SHOW_WEEKDAY: AtomicBool = AtomicBool::new(false);
 static SHOW_SECONDS: AtomicBool = AtomicBool::new(false);
+static SHOW_DATE: AtomicBool = AtomicBool::new(true);
+static USE_24H: AtomicBool = AtomicBool::new(true);
 
 /// Sets what the clock shows (settings clock-show-weekday / -seconds).
 pub fn set_clock_options(weekday: bool, seconds: bool) {
@@ -15,14 +17,33 @@ pub fn set_clock_options(weekday: bool, seconds: bool) {
     SHOW_SECONDS.store(seconds, Ordering::Relaxed);
 }
 
-/// GNOME-style clock: [weekday] abbreviated month, day, en space, 24-hour time.
-fn clock_format(weekday: bool, seconds: bool) -> &'static CStr {
-    match (weekday, seconds) {
-        (false, false) => c"%b %-d\u{2002}%H:%M",
-        (false, true) => c"%b %-d\u{2002}%H:%M:%S",
-        (true, false) => c"%a %b %-d\u{2002}%H:%M",
-        (true, true) => c"%a %b %-d\u{2002}%H:%M:%S",
+/// Sets the date and 12/24-hour options.
+pub fn set_clock_date_options(date: bool, h24: bool) {
+    SHOW_DATE.store(date, Ordering::Relaxed);
+    USE_24H.store(h24, Ordering::Relaxed);
+}
+
+/// GNOME-style clock: [weekday] [month day] time, parts joined by an en space.
+fn clock_format(weekday: bool, date: bool, seconds: bool, h24: bool) -> CString {
+    let mut day = Vec::new();
+    if weekday {
+        day.push("%a");
     }
+    if date {
+        day.push("%b %-d");
+    }
+    let time = match (h24, seconds) {
+        (true, false) => "%H:%M",
+        (true, true) => "%H:%M:%S",
+        (false, false) => "%-I:%M %p",
+        (false, true) => "%-I:%M:%S %p",
+    };
+    let mut out = day.join(" ");
+    if !out.is_empty() {
+        out.push('\u{2002}');
+    }
+    out.push_str(time);
+    CString::new(out).unwrap_or_default()
 }
 
 #[repr(C)]
@@ -81,8 +102,13 @@ pub fn format_date(date: Option<(i32, u32, u32)>, format: &CStr) -> String {
 
 /// Current local time formatted for the top bar.
 pub fn clock_text() -> String {
-    let fmt = clock_format(SHOW_WEEKDAY.load(Ordering::Relaxed), SHOW_SECONDS.load(Ordering::Relaxed));
-    format_date(None, fmt)
+    let fmt = clock_format(
+        SHOW_WEEKDAY.load(Ordering::Relaxed),
+        SHOW_DATE.load(Ordering::Relaxed),
+        SHOW_SECONDS.load(Ordering::Relaxed),
+        USE_24H.load(Ordering::Relaxed),
+    );
+    format_date(None, &fmt)
 }
 
 #[cfg(test)]
@@ -99,8 +125,9 @@ mod tests {
     #[test]
     fn clock_options_change_the_format() {
         let day = Some((2026, 11, 22));
-        assert_eq!(format_date(day, clock_format(true, false)).split_whitespace().next(), Some("Sun"));
-        assert!(clock_format(false, true).to_str().unwrap().ends_with("%S"));
+        assert_eq!(format_date(day, &clock_format(true, true, false, true)).split_whitespace().next(), Some("Sun"));
+        assert!(clock_format(false, true, true, true).to_str().unwrap().ends_with("%S"));
+        assert_eq!(clock_format(false, false, false, false).to_str().unwrap(), "%-I:%M %p");
     }
 
     #[test]

@@ -8,6 +8,7 @@ const std = @import("std");
 const plugin = @import("plugin.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const width: f32 = 380;
 const padding: f32 = 14;
@@ -207,9 +208,9 @@ fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, bod
 
     const text_x = padding + icon_size + 12;
     const text_w = width - text_x - padding;
-    const title = ui.label(summary, "Adwaita Sans Bold 11");
+    const title = ui.label(summary, config.font(.bold, 0));
     c.clutter_actor_set_width(title, @min(ui.preferredWidth(title), text_w));
-    const text = ui.label(body, "Adwaita Sans 10");
+    const text = ui.label(body, config.font(.regular, -1));
     c.clutter_actor_set_width(text, @min(ui.preferredWidth(text), text_w));
     c.clutter_actor_set_opacity(text, 210);
 
@@ -217,7 +218,7 @@ fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, bod
     const text_h = if (std.mem.span(body).len > 0) ui.preferredHeight(text) else 0;
     const height = @max(icon_size, title_h + 2 + text_h) + 2 * padding;
 
-    const card = ui.roundedRect(width, height, 18, background);
+    const card = ui.roundedRect(width, height, config.radius(1), background);
     const glyph = bannerIcon(app, icon, icon_size);
     c.clutter_actor_set_position(glyph, padding, (height - icon_size) / 2);
     c.clutter_actor_add_child(card, glyph);
@@ -230,8 +231,9 @@ fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, bod
     var sw: f32 = 0;
     var sh: f32 = 0;
     c.clutter_actor_get_size(s, &sw, &sh);
-    const top: f32 = @as(f32, @floatFromInt(c.cali_shell_panel_height())) + 8;
-    c.clutter_actor_set_position(card, (sw - width) / 2, top);
+    const top: f32 = @as(f32, @floatFromInt(@import("config.zig").panelHeight())) + 8;
+    const x = if (config.notifications_top_right) sw - width - 12 else (sw - width) / 2;
+    c.clutter_actor_set_position(card, x, top);
     c.clutter_actor_set_reactive(card, 1);
     plugin.connect(card, "button-release-event", &onBannerClicked, null);
     c.clutter_actor_add_child(s, card);

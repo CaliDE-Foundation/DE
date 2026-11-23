@@ -5,6 +5,7 @@
 const std = @import("std");
 const plugin = @import("plugin.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const max_layouts = 8;
 
@@ -23,7 +24,7 @@ pub fn init(d: ?*c.MetaDisplay) void {
 
 /// Short name for the top bar ("en"), or null with a single layout.
 pub fn indicator(buf: []u8) ?[*:0]const u8 {
-    if (n_layouts < 2) return null;
+    if (n_layouts < 2 or !@import("config.zig").show_keyboard_indicator) return null;
     if (c.cali_shell_layout_short_name(@ptrCast(&layouts[current]), buf.ptr, buf.len) == 0) return null;
     return @ptrCast(buf.ptr);
 }

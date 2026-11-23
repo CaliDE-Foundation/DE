@@ -1,0 +1,26 @@
+#!/bin/sh
+# Starts a Cali session, from a display manager (GDM, SDDM, LightDM, ...)
+# or from a text console. Works with systemd-logind or elogind.
+export XDG_CURRENT_DESKTOP=Cali
+export XDG_SESSION_DESKTOP=cali
+export DESKTOP_SESSION=cali
+export XDG_SESSION_TYPE=wayland
+# Ask toolkits to use Wayland (with fallbacks to X11 through Xwayland).
+export MOZ_ENABLE_WAYLAND=1
+export QT_QPA_PLATFORM="wayland;xcb"
+export SDL_VIDEODRIVER="wayland,x11"
+
+# Display managers usually start a D-Bus session; a console login may not.
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-run-session >/dev/null 2>&1; then
+  exec dbus-run-session -- "$0" "$@"
+fi
+
+# Share the session environment with systemd user services, if there are any.
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  systemctl --user import-environment XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE DESKTOP_SESSION
+fi
+
+# The compositor takes over the screen (KMS) through logind/elogind.
+# CALI_SESSION_ARGS replaces the arguments, e.g. for testing headless.
+# shellcheck disable=SC2086
+exec cali-compositor ${CALI_SESSION_ARGS:---wayland --display-server} "$@"

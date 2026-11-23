@@ -1,0 +1,32 @@
+# Maintainer: CaliDE Foundation
+# Sookie replaces Mutter (it installs the same GSettings schemas).
+pkgname=sookie-git
+pkgver=r0
+pkgrel=1
+pkgdesc="Wayland compositor and window manager for the Cali desktop (a fork of Mutter)"
+arch=(x86_64)
+url="https://github.com/CaliDE-Foundation/Sookie"
+license=(GPL-2.0-or-later)
+depends=(colord glib2 graphene gsettings-desktop-schemas gtk4 lcms2 libadwaita libdisplay-info
+         libei libinput libsm libwacom libxkbcommon pipewire startup-notification
+         systemd-libs xorg-xwayland)
+makedepends=(git meson ninja gobject-introspection python wayland-protocols)
+provides=(sookie)
+conflicts=(sookie mutter)
+source=("git+https://github.com/CaliDE-Foundation/Sookie.git")
+sha256sums=(SKIP)
+
+pkgver() {
+  cd Sookie
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  arch-meson Sookie build -D tests=disabled -D mutter_tests=false -D clutter_tests=false \
+    -D cogl_tests=false -D installed_tests=false
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "$pkgdir"
+}

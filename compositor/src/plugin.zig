@@ -18,6 +18,10 @@ const session = @import("session.zig");
 const lock = @import("lock.zig");
 const screenshot = @import("screenshot.zig");
 const keyboard = @import("keyboard.zig");
+const config = @import("config.zig");
+const tiling = @import("tiling.zig");
+const wobbly = @import("wobbly.zig");
+const media = @import("media.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -53,7 +57,6 @@ const background_top = c.CoglColor{ .red = 0x2c, .green = 0x4a, .blue = 0x86, .a
 const background_bottom = c.CoglColor{ .red = 0xe2, .green = 0x7d, .blue = 0x60, .alpha = 255 };
 const panel_color = c.CoglColor{ .red = 0, .green = 0, .blue = 0, .alpha = 255 };
 const panel_text_color = c.CoglColor{ .red = 255, .green = 255, .blue = 255, .alpha = 255 };
-const panel_font = "Adwaita Sans Bold 11";
 
 const map_duration_ms = 180;
 const map_start_scale = 0.94;
@@ -130,6 +133,9 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     lock.init(d, stage, panel);
     screenshot.init(d, stage);
     keyboard.init(d);
+    tiling.init(d);
+    wobbly.init(d);
+    media.init();
     settings.init();
 
     // CALI_DEBUG_SECOND_MONITOR=<seconds>: move the focused window to monitor 2.
@@ -185,7 +191,7 @@ pub fn fillBackground(group: *c.ClutterActor) void {
         const background = c.meta_background_new(d);
         if (wallpaper_texture) |texture| {
             const color_state = c.clutter_context_get_default_color_state(c.clutter_actor_get_context(group));
-            c.meta_background_set_texture(background, texture, @intCast(c.G_DESKTOP_BACKGROUND_STYLE_ZOOM), color_state);
+            c.meta_background_set_texture(background, texture, @intCast(wallpaper_style), color_state);
         } else {
             var top = wallpaper_top;
             var bottom = wallpaper_bottom;
@@ -318,6 +324,31 @@ fn keybindingFilter(_: ?*c.MetaPlugin, _: ?*c.MetaKeyBinding) callconv(.C) c.gbo
 // ---- Top bar -------------------------------------------------------------------------
 
 var clock_dot: ?*c.ClutterActor = null;
+var clock_align: ?*c.ClutterAlignConstraint = null;
+var wallpaper_style: c_uint = c.G_DESKTOP_BACKGROUND_STYLE_ZOOM;
+
+/// The wallpaper-style setting: how an image fits the screen.
+pub fn setWallpaperStyle(name: []const u8) void {
+    const eql = std.mem.eql;
+    wallpaper_style = if (eql(u8, name, "centered")) c.G_DESKTOP_BACKGROUND_STYLE_CENTERED else if (eql(u8, name, "scaled")) c.G_DESKTOP_BACKGROUND_STYLE_SCALED else if (eql(u8, name, "stretched")) c.G_DESKTOP_BACKGROUND_STYLE_STRETCHED else if (eql(u8, name, "wallpaper")) c.G_DESKTOP_BACKGROUND_STYLE_WALLPAPER else c.G_DESKTOP_BACKGROUND_STYLE_ZOOM;
+    if (background_group) |group| fillBackground(group);
+}
+
+/// Re-applies every look-and-behavior setting (one of them changed).
+pub fn restyle() void {
+    if (panel) |p| {
+        const alpha: u8 = @intFromFloat(std.math.clamp(config.panel_opacity, 0, 1) * 255);
+        c.clutter_actor_set_background_color(p, &c.CoglColor{ .red = 0, .green = 0, .blue = 0, .alpha = alpha });
+        if (clock) |t| c.clutter_text_set_font_name(@ptrCast(@alignCast(t)), config.font(.bold, 0));
+    }
+    layoutPanel();
+    refreshClock();
+    workspaces.restyle();
+    statusmenu.restyle();
+    @import("calendar.zig").refresh();
+    @import("dock.zig").rebuild();
+    tiling.retileAll();
+}
 var stage_actor: ?*c.ClutterActor = null;
 
 /// The small dot beside the clock that says there are notifications.
@@ -331,7 +362,26 @@ fn placeClockDot() void {
     const dot = clock_dot orelse return;
     const text = clock orelse return;
     const p = panel orelse return;
-    const x = (c.clutter_actor_get_width(p) + ui.preferredWidth(text)) / 2 + 8;
+    // Clock position: centered, after the workspace dots, or before the status icons.
+    if (clock_align) |a| {
+        const factor: f32 = switch (config.clock_position) {
+            .center => 0.5,
+            .left => 0,
+            .right => 1,
+        };
+        c.clutter_align_constraint_set_factor(a, factor);
+        const shift: f32 = switch (config.clock_position) {
+            .center => 0,
+            .left => workspaces.indicatorWidth() + 32,
+            .right => -(statusmenu.iconsWidth() + 32),
+        };
+        c.clutter_actor_set_translation(text, shift, 0, 0);
+    }
+    var tx: f32 = 0;
+    var ty: f32 = 0;
+    var tz: f32 = 0;
+    c.clutter_actor_get_translation(text, &tx, &ty, &tz);
+    const x = c.clutter_actor_get_x(text) + tx + ui.preferredWidth(text) + 8;
     c.clutter_actor_set_position(dot, x, (c.clutter_actor_get_height(p) - 6) / 2);
 }
 
@@ -340,9 +390,12 @@ fn createPanel(stage: ?*c.ClutterActor) void {
     const p = c.clutter_actor_new();
     c.clutter_actor_set_background_color(p, &panel_color);
 
-    const text = c.clutter_text_new_full(panel_font, "", &panel_text_color);
+    const text = c.clutter_text_new_full(config.font(.bold, 0), "", &panel_text_color);
     c.clutter_actor_add_child(p, text);
-    c.clutter_actor_add_constraint(text, c.clutter_align_constraint_new(p, @intCast(c.CLUTTER_ALIGN_BOTH), 0.5));
+    const x_align = c.clutter_align_constraint_new(p, @intCast(c.CLUTTER_ALIGN_X_AXIS), 0.5);
+    c.clutter_actor_add_constraint(text, x_align);
+    c.clutter_actor_add_constraint(text, c.clutter_align_constraint_new(p, @intCast(c.CLUTTER_ALIGN_Y_AXIS), 0.5));
+    clock_align = @ptrCast(@alignCast(x_align));
 
     c.clutter_actor_add_child(stage, p);
     panel = p;
@@ -365,7 +418,7 @@ fn layoutPanel() void {
 
     var rect: c.MtkRectangle = undefined;
     c.meta_display_get_monitor_geometry(d, primary, &rect);
-    const height: c_int = @intCast(c.cali_shell_panel_height());
+    const height: c_int = @intCast(@import("config.zig").panelHeight());
 
     c.clutter_actor_set_position(p, @floatFromInt(rect.x), @floatFromInt(rect.y));
     c.clutter_actor_set_size(p, @floatFromInt(rect.width), @floatFromInt(height));
@@ -476,27 +529,35 @@ fn map(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) v
     if (!appWindow(window_actor)) return c.meta_plugin_map_completed(plugin, window_actor);
     overview.windowMapped();
 
+    tiling.windowMapped(c.meta_window_actor_get_meta_window(window_actor));
+    if (config.open_animation == .none) return c.meta_plugin_map_completed(plugin, window_actor);
+
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
     c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
     c.clutter_actor_set_opacity(actor, 0);
-    c.clutter_actor_set_scale(actor, map_start_scale, map_start_scale);
+    switch (config.open_animation) {
+        .scale => c.clutter_actor_set_scale(actor, map_start_scale, map_start_scale),
+        .slide => c.clutter_actor_set_translation(actor, 0, 40, 0),
+        else => {},
+    }
     c.clutter_actor_show(actor);
 
     ui.ease(actor, map_duration_ms, c.CLUTTER_EASE_OUT_QUAD);
     c.clutter_actor_set_opacity(actor, 255);
     c.clutter_actor_set_scale(actor, 1.0, 1.0);
+    c.clutter_actor_set_translation(actor, 0, 0, 0);
     c.clutter_actor_restore_easing_state(actor);
     startEffect(plugin, actor, .map);
 }
 
 /// Closing windows fade out while shrinking a little.
 fn destroy(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
-    if (!appWindow(window_actor)) return c.meta_plugin_destroy_completed(plugin, window_actor);
+    if (!appWindow(window_actor) or config.close_animation == .none) return c.meta_plugin_destroy_completed(plugin, window_actor);
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
     c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
     ui.ease(actor, destroy_ms, c.CLUTTER_EASE_OUT_QUAD);
     c.clutter_actor_set_opacity(actor, 0);
-    c.clutter_actor_set_scale(actor, 0.9, 0.9);
+    if (config.close_animation == .scale) c.clutter_actor_set_scale(actor, 0.9, 0.9);
     c.clutter_actor_restore_easing_state(actor);
     startEffect(plugin, actor, .destroy);
 }
@@ -521,13 +582,15 @@ fn minimizeOffset(actor: *c.ClutterActor) [2]f32 {
 
 /// Minimizing shrinks the window down toward the dock.
 fn minimize(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
-    if (!appWindow(window_actor)) return c.meta_plugin_minimize_completed(plugin, window_actor);
+    if (!appWindow(window_actor) or config.minimize_animation == .none) return c.meta_plugin_minimize_completed(plugin, window_actor);
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
     const offset = minimizeOffset(actor);
     c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
     ui.ease(actor, minimize_ms, c.CLUTTER_EASE_IN_QUAD);
-    c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
-    c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    if (config.minimize_animation == .dock) {
+        c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
+        c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    }
     c.clutter_actor_set_opacity(actor, 0);
     c.clutter_actor_restore_easing_state(actor);
     startEffect(plugin, actor, .minimize);
@@ -535,12 +598,14 @@ fn minimize(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(
 
 /// Restoring grows the window back out of the dock.
 fn unminimize(plugin: ?*c.MetaPlugin, window_actor: ?*c.MetaWindowActor) callconv(.C) void {
-    if (!appWindow(window_actor)) return c.meta_plugin_unminimize_completed(plugin, window_actor);
+    if (!appWindow(window_actor) or config.minimize_animation == .none) return c.meta_plugin_unminimize_completed(plugin, window_actor);
     const actor: *c.ClutterActor = @ptrCast(@alignCast(window_actor));
     const offset = minimizeOffset(actor);
     c.clutter_actor_set_pivot_point(actor, 0.5, 0.5);
-    c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
-    c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    if (config.minimize_animation == .dock) {
+        c.clutter_actor_set_translation(actor, offset[0], offset[1], 0);
+        c.clutter_actor_set_scale(actor, 0.1, 0.1);
+    }
     c.clutter_actor_set_opacity(actor, 0);
     c.clutter_actor_show(actor);
     ui.ease(actor, minimize_ms, c.CLUTTER_EASE_OUT_QUAD);

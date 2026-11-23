@@ -7,6 +7,7 @@ const std = @import("std");
 const plugin = @import("plugin.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 pub var locked = false;
 
@@ -93,11 +94,11 @@ pub fn lock() void {
 
     // Center column: clock, date, user, password field, message.
     const column_y = h * 0.28;
-    clock_label = ui.label("", "Adwaita Sans Bold 64");
-    date_label = ui.label("", "Adwaita Sans 16");
+    clock_label = ui.label("", config.font(.bold, 53));
+    date_label = ui.label("", config.font(.regular, 5));
     var user_buf: [128]u8 = undefined;
     _ = c.cali_shell_current_user(&user_buf, user_buf.len);
-    const user = ui.label(@ptrCast(&user_buf), "Adwaita Sans Bold 13");
+    const user = ui.label(@ptrCast(&user_buf), config.font(.bold, 2));
     for ([_]?*c.ClutterActor{ clock_label, date_label, user }) |a| {
         ui.center(a, root, c.CLUTTER_ALIGN_X_AXIS);
         c.clutter_actor_add_child(root, a);
@@ -110,7 +111,7 @@ pub fn lock() void {
     const field_h: f32 = 40;
     const field = ui.roundedRect(field_w, field_h, field_h / 2, 0xffffff26);
     c.clutter_actor_set_position(field, (w - field_w) / 2, column_y + 224);
-    const text = c.clutter_text_new_full("Adwaita Sans 12", "", &ui.white);
+    const text = c.clutter_text_new_full(config.font(.regular, 1), "", &ui.white);
     const t: *c.ClutterText = @ptrCast(@alignCast(text));
     c.clutter_text_set_editable(t, 1);
     c.clutter_text_set_activatable(t, 1);
@@ -125,7 +126,7 @@ pub fn lock() void {
     plugin.connect(text, "activate", &onActivate, null);
     entry = text;
 
-    const msg = ui.label("Enter your password to unlock", "Adwaita Sans 11");
+    const msg = ui.label("Enter your password to unlock", config.font(.regular, 0));
     c.clutter_actor_set_opacity(msg, 190);
     ui.center(msg, root, c.CLUTTER_ALIGN_X_AXIS);
     c.clutter_actor_set_y(msg, column_y + 278);

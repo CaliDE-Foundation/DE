@@ -14,6 +14,8 @@ mod dock;
 mod draw;
 mod search;
 mod status;
+mod tiling;
+mod wobble;
 mod icons;
 mod menu;
 mod overview;
@@ -23,6 +25,79 @@ mod workspaces;
 pub use calendar::CaliDay;
 pub use dock::CaliDockStyle;
 pub use status::CaliStatus;
+pub use wobble::CaliWobble;
+
+/// Sets the clock's date and 12/24-hour options.
+#[no_mangle]
+pub extern "C" fn cali_shell_set_clock_date_options(date: bool, h24: bool) {
+    panel::set_clock_date_options(date, h24);
+}
+
+/// Overview layout with a custom gap between windows.
+///
+/// # Safety
+/// As `cali_shell_overview_layout`.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_overview_layout_gap(
+    area: CaliRect,
+    windows: *const CaliRect,
+    n: usize,
+    gap: f32,
+    out: *mut CaliRect,
+) -> usize {
+    if n == 0 || windows.is_null() || out.is_null() {
+        return 0;
+    }
+    let placed = overview::layout_with_gap(area, unsafe { std::slice::from_raw_parts(windows, n) }, gap);
+    unsafe { std::slice::from_raw_parts_mut(out, placed.len()) }.copy_from_slice(&placed);
+    placed.len()
+}
+
+/// Tiling: writes `n` window rects into `out`. `mode` 1 = dwindle (uses
+/// `ratio`), 2 = scrolling columns (uses `focused` and `ratio` as the column
+/// width share). Returns how many were written.
+///
+/// # Safety
+/// `out` must point to `n` writable rects.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_tile(mode: u32, area: CaliRect, n: usize, focused: usize, ratio: f32, gap: f32, out: *mut CaliRect) -> usize {
+    if n == 0 || out.is_null() {
+        return 0;
+    }
+    let rects = match mode {
+        1 => tiling::dwindle(area, n, gap, ratio),
+        2 => tiling::scrolling(area, n, focused, ratio, gap),
+        _ => return 0,
+    };
+    unsafe { std::slice::from_raw_parts_mut(out, rects.len()) }.copy_from_slice(&rects);
+    rects.len()
+}
+
+/// Wobbly windows: advances the springs after the window moved (dx, dy) in
+/// `dt` seconds. Returns true once it has settled.
+///
+/// # Safety
+/// `w` must point to a valid `CaliWobble`.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_wobble_step(w: *mut CaliWobble, dx: f32, dy: f32, dt: f32, strength: f32, friction: f32) -> bool {
+    let Some(w) = (unsafe { w.as_mut() }) else { return true };
+    wobble::step(w, dx, dy, dt, strength, friction);
+    wobble::settled(w)
+}
+
+/// Wobbly windows: how far to move vertex (x, y) of a window grabbed at (gx, gy).
+///
+/// # Safety
+/// `w` must point to a valid `CaliWobble`; `ox`/`oy` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_wobble_offset(w: *const CaliWobble, x: f32, y: f32, gx: f32, gy: f32, width: f32, height: f32, ox: *mut f32, oy: *mut f32) {
+    let (Some(w), false, false) = (unsafe { w.as_ref() }, ox.is_null(), oy.is_null()) else { return };
+    let (dx, dy) = wobble::offset(w, x, y, gx, gy, width, height);
+    unsafe {
+        *ox = dx;
+        *oy = dy;
+    }
+}
 
 /// The `i`th top bar status icon for `status`, left to right; NULL past the end.
 ///

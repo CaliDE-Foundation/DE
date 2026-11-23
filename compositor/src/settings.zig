@@ -50,8 +50,101 @@ fn is(value: ?*c.GVariant, type_string: [*:0]const u8) bool {
     return c.g_variant_is_of_type(value, @ptrCast(type_string)) != 0;
 }
 
+const cfg = @import("config.zig");
+
+const NumberSetting = struct { name: []const u8, ptr: *f32 };
+const number_settings = [_]NumberSetting{
+    .{ .name = "corner-radius", .ptr = &cfg.corner_radius },
+    .{ .name = "shell-font-size", .ptr = &cfg.font_size },
+    .{ .name = "panel-height", .ptr = &cfg.panel_height },
+    .{ .name = "panel-opacity", .ptr = &cfg.panel_opacity },
+    .{ .name = "overview-dim", .ptr = &cfg.overview_dim },
+    .{ .name = "overview-window-gap", .ptr = &cfg.overview_gap },
+    .{ .name = "dock-icon-size", .ptr = &cfg.dock_icon_size },
+    .{ .name = "wobbly-strength", .ptr = &cfg.wobbly_strength },
+    .{ .name = "wobbly-friction", .ptr = &cfg.wobbly_friction },
+    .{ .name = "tiling-gap", .ptr = &cfg.tiling_gap },
+    .{ .name = "tiling-outer-gap", .ptr = &cfg.tiling_outer_gap },
+    .{ .name = "tiling-split-ratio", .ptr = &cfg.tiling_split },
+    .{ .name = "tiling-column-width", .ptr = &cfg.tiling_column },
+};
+
+const BoolSetting = struct { name: []const u8, ptr: *bool };
+const bool_settings = [_]BoolSetting{
+    .{ .name = "show-workspace-dots", .ptr = &cfg.show_workspace_dots },
+    .{ .name = "show-battery-percentage", .ptr = &cfg.show_battery_percentage },
+    .{ .name = "show-keyboard-indicator", .ptr = &cfg.show_keyboard_indicator },
+    .{ .name = "overview-search", .ptr = &cfg.overview_search },
+    .{ .name = "app-folders", .ptr = &cfg.app_folders },
+    .{ .name = "dock-running-dots", .ptr = &cfg.dock_running_dots },
+    .{ .name = "media-controls", .ptr = &cfg.media_controls },
+    .{ .name = "wobbly-windows", .ptr = &cfg.wobbly },
+    .{ .name = "dynamic-workspaces", .ptr = &cfg.dynamic_workspaces },
+    .{ .name = "alt-tab-current-workspace", .ptr = &cfg.alt_tab_current_workspace },
+};
+
+var clock_date = true;
+var clock_24h = true;
+
+/// The look-and-behavior settings kept in config.zig. Returns true if
+/// `key` was one of them.
+fn applyConfig(key: []const u8, value: ?*c.GVariant) bool {
+    const eql = std.mem.eql;
+    if (is(value, "d")) {
+        for (number_settings) |setting| {
+            if (eql(u8, key, setting.name)) {
+                setting.ptr.* = @floatCast(c.g_variant_get_double(value));
+                return true;
+            }
+        }
+    }
+    if (is(value, "b")) {
+        const on = c.g_variant_get_boolean(value) != 0;
+        for (bool_settings) |setting| {
+            if (eql(u8, key, setting.name)) {
+                setting.ptr.* = on;
+                return true;
+            }
+        }
+        if (eql(u8, key, "clock-show-date")) clock_date = on else if (eql(u8, key, "clock-24h")) clock_24h = on else return false;
+        c.cali_shell_set_clock_date_options(clock_date, clock_24h);
+        return true;
+    }
+    if (is(value, "s")) {
+        const text = std.mem.span(c.g_variant_get_string(value, null));
+        if (eql(u8, key, "shell-font")) {
+            cfg.setFont(text);
+        } else if (eql(u8, key, "clock-position")) {
+            cfg.clock_position = cfg.parseEnum(cfg.ClockPosition, text, .center);
+        } else if (eql(u8, key, "open-animation")) {
+            cfg.open_animation = cfg.parseEnum(cfg.OpenAnimation, text, .scale);
+        } else if (eql(u8, key, "close-animation")) {
+            cfg.close_animation = cfg.parseEnum(cfg.CloseAnimation, text, .scale);
+        } else if (eql(u8, key, "minimize-animation")) {
+            cfg.minimize_animation = cfg.parseEnum(cfg.MinimizeAnimation, text, .dock);
+        } else if (eql(u8, key, "tiling-mode")) {
+            cfg.tiling_mode = cfg.parseEnum(cfg.TilingMode, text, .off);
+        } else if (eql(u8, key, "tiling-new-windows")) {
+            cfg.tiling_new_tiled = !eql(u8, text, "floating");
+        } else if (eql(u8, key, "alt-tab-mode")) {
+            cfg.alt_tab_windows = eql(u8, text, "windows");
+        } else if (eql(u8, key, "notification-position")) {
+            cfg.notifications_top_right = eql(u8, text, "top-right");
+        } else if (eql(u8, key, "wallpaper-style")) {
+            plugin.setWallpaperStyle(text);
+        } else return false;
+        return true;
+    }
+    return false;
+}
+
 fn apply(key: [:0]const u8, value: ?*c.GVariant) void {
     const eql = std.mem.eql;
+    if (applyConfig(key, value)) {
+        plugin.restyle();
+        std.log.debug("settings: {s} applied", .{key});
+        return;
+    }
     if (eql(u8, key, "accent-color") and is(value, "s")) {
         ui.accent = c.cali_shell_accent_rgba(c.g_variant_get_string(value, null));
     } else if (eql(u8, key, "animation-speed") and is(value, "d")) {

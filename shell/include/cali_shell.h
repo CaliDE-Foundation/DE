@@ -56,6 +56,10 @@ typedef struct {
   float brightness;
 } CaliStatus;
 
+typedef struct {
+  float lag_x, lag_y, vel_x, vel_y;
+} CaliWobble;
+
 const char *cali_shell_version(void);
 CaliShell  *cali_shell_new(void);
 bool        cali_shell_start(CaliShell *shell);
@@ -125,9 +129,23 @@ void           cali_shell_free_image(unsigned char *pixels, size_t len);
 size_t      cali_shell_layout_short_name(const char *layout, char *buf, size_t len);
 const char *cali_shell_app_folder(const char *categories);
 
+/* More clock options */
+void cali_shell_set_clock_date_options(bool date, bool h24);
+
+/* Tiling: mode 1 = dwindle (ratio = split), 2 = scrolling (ratio = column width share) */
+size_t cali_shell_tile(unsigned int mode, CaliRect area, size_t n, size_t focused,
+                       float ratio, float gap, CaliRect *out);
+
+/* Wobbly windows */
+bool cali_shell_wobble_step(CaliWobble *w, float dx, float dy, float dt, float strength, float friction);
+void cali_shell_wobble_offset(const CaliWobble *w, float x, float y, float gx, float gy,
+                              float width, float height, float *ox, float *oy);
+
 /* Activities overview */
 size_t cali_shell_overview_layout(CaliRect area, const CaliRect *windows,
                                   size_t n, CaliRect *out);
+size_t cali_shell_overview_layout_gap(CaliRect area, const CaliRect *windows,
+                                      size_t n, float gap, CaliRect *out);
 
 #ifdef __cplusplus
 }

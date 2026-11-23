@@ -6,6 +6,7 @@ const plugin = @import("plugin.zig");
 const dock = @import("dock.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const max_apps = 16;
 const icon_size: f32 = 64;
@@ -81,14 +82,16 @@ fn debugFinish(_: c.gpointer) callconv(.C) c.gboolean {
 fn collect() void {
     const d = display orelse return;
     n_entries = 0;
-    const workspace = c.meta_workspace_manager_get_active_workspace(c.meta_display_get_workspace_manager(d));
+    const workspace = if (config.alt_tab_current_workspace) c.meta_workspace_manager_get_active_workspace(c.meta_display_get_workspace_manager(d)) else null;
     const windows = c.meta_display_get_tab_list(d, @intCast(c.META_TAB_LIST_NORMAL), workspace);
     defer c.g_list_free(windows);
     var node = windows;
     outer: while (node != null and n_entries < max_apps) : (node = node.*.next) {
         const window: *c.MetaWindow = @ptrCast(@alignCast(node.*.data orelse continue));
         const info = dock.appForWindow(window);
-        if (info) |i| {
+        // In windows mode every window gets its own entry.
+        if (info != null and !config.alt_tab_windows) {
+            const i = info.?;
             for (entries[0..n_entries]) |e| {
                 if (e.info != null and c.g_app_info_equal(e.info, i) != 0) {
                     c.g_object_unref(i);
@@ -117,7 +120,7 @@ fn open(backward: bool) void {
     const n: f32 = @floatFromInt(n_entries);
     const w = n * cell + 2 * padding;
     const h = cell + label_h + 2 * padding;
-    const k = ui.roundedRect(w, h, 24, background);
+    const k = ui.roundedRect(w, h, config.radius(1.3), background);
 
     const m = ui.roundedRect(cell, cell, 16, highlight);
     c.clutter_actor_set_y(m, padding);
@@ -130,7 +133,7 @@ fn open(backward: bool) void {
         c.clutter_actor_add_child(k, icon);
     }
 
-    const l = ui.label("", "Adwaita Sans Bold 11");
+    const l = ui.label("", config.font(.bold, 0));
     c.clutter_actor_set_y(l, padding + cell + 6);
     c.clutter_actor_add_child(k, l);
     name_label = l;
@@ -177,7 +180,8 @@ fn updateSelection(animate: bool) void {
     if (animate) c.clutter_actor_restore_easing_state(m);
 
     const e = entries[selected];
-    const text: [*:0]const u8 = if (e.info) |i| c.g_app_info_get_name(i) else c.meta_window_get_title(e.window) orelse "";
+    const title = c.meta_window_get_title(e.window);
+    const text: [*:0]const u8 = if (config.alt_tab_windows and title != null) title else if (e.info) |i| c.g_app_info_get_name(i) else title orelse "";
     const l = name_label orelse return;
     c.clutter_text_set_text(@ptrCast(@alignCast(l)), text);
     const k = card orelse return;

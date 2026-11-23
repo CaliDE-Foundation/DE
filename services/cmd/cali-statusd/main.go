@@ -6,7 +6,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -46,6 +50,12 @@ const introspection = `<node>
     <method name="ListBluetoothDevices"><arg direction="out" type="a(ssbb)"/></method>
     <method name="SetBluetoothDeviceConnected"><arg direction="in" type="s" name="path"/><arg direction="in" type="b"/></method>
     <signal name="Changed"><arg type="a{sv}"/></signal>
+    <method name="GetMedia"><arg direction="out" type="a{sv}"/></method>
+    <method name="MediaPlayPause"/>
+    <method name="MediaNext"/>
+    <method name="MediaPrevious"/>
+    <method name="MediaSeek"><arg direction="in" type="x" name="position"/></method>
+    <signal name="MediaChanged"><arg type="a{sv}"/></signal>
   </interface>` + introspect.IntrospectDataString + `</node>`
 
 type server struct {
@@ -60,6 +70,9 @@ type server struct {
 	fakeStatus  status.Status
 	fakeNets    []status.WifiNetwork
 	fakeDevices []status.BluetoothDevice
+	fakeMedia   status.Media
+
+	media status.Media
 }
 
 // ---- Reading ---------------------------------------------------------------------
@@ -301,6 +314,164 @@ func (s *server) SetBluetoothEnabled(on bool) *dbus.Error {
 	return nil
 }
 
+// ---- Media (MPRIS) ------------------------------------------------------------------
+
+const mprisPrefix = "org.mpris.MediaPlayer2."
+const mprisPath = dbus.ObjectPath("/org/mpris/MediaPlayer2")
+
+func (s *server) players() []status.PlayerState {
+	var names []string
+	if s.session.BusObject().Call("org.freedesktop.DBus.ListNames", 0).Store(&names) != nil {
+		return nil
+	}
+	var out []status.PlayerState
+	for _, n := range names {
+		if !strings.HasPrefix(n, mprisPrefix) {
+			continue
+		}
+		st, _ := prop[string](s.session, n, mprisPath, "org.mpris.MediaPlayer2.Player.PlaybackStatus")
+		out = append(out, status.PlayerState{Name: n, Status: st})
+	}
+	return out
+}
+
+func (s *server) readMedia() status.Media {
+	if s.fake {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.fakeMedia
+	}
+	name := status.PickPlayer(s.players())
+	if name == "" {
+		return status.Media{}
+	}
+	m := status.Media{Player: name}
+	m.Identity, _ = prop[string](s.session, name, mprisPath, "org.mpris.MediaPlayer2.Identity")
+	entry, _ := prop[string](s.session, name, mprisPath, "org.mpris.MediaPlayer2.DesktopEntry")
+	m.Icon = status.AppIcon(entry, status.DataDirs())
+	st, _ := prop[string](s.session, name, mprisPath, "org.mpris.MediaPlayer2.Player.PlaybackStatus")
+	m.Playing = st == "Playing"
+	m.Position, _ = prop[int64](s.session, name, mprisPath, "org.mpris.MediaPlayer2.Player.Position")
+	meta, _ := prop[map[string]dbus.Variant](s.session, name, mprisPath, "org.mpris.MediaPlayer2.Player.Metadata")
+	if v, ok := meta["xesam:title"].Value().(string); ok {
+		m.Title = v
+	}
+	if v, ok := meta["xesam:artist"].Value().([]string); ok {
+		m.Artist = strings.Join(v, ", ")
+	}
+	switch v := meta["mpris:length"].Value().(type) {
+	case int64:
+		m.Length = v
+	case uint64:
+		m.Length = int64(v)
+	}
+	if art, ok := meta["mpris:artUrl"].Value().(string); ok {
+		path, remote := status.ArtLocation(art)
+		if remote != "" {
+			path = cachedArt(remote)
+		}
+		m.ArtPath = path
+	}
+	if out, err := wpctl("inspect", sink); err == nil {
+		m.Output = status.NodeDescription(out)
+	}
+	return m
+}
+
+// cachedArt downloads web artwork once into ~/.cache/cali/art.
+func cachedArt(remote string) string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	dir = filepath.Join(dir, "cali", "art")
+	file := filepath.Join(dir, fmt.Sprintf("%x", sha1.Sum([]byte(remote))))
+	if _, err := os.Stat(file); err == nil {
+		return file
+	}
+	client := http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(remote)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil || os.MkdirAll(dir, 0o755) != nil || os.WriteFile(file, data, 0o644) != nil {
+		return ""
+	}
+	return file
+}
+
+func (s *server) refreshMedia() {
+	m := s.readMedia()
+	s.mu.Lock()
+	changed := m != s.media
+	s.media = m
+	s.mu.Unlock()
+	if changed {
+		out := map[string]dbus.Variant{}
+		for k, v := range m.Map() {
+			out[k] = dbus.MakeVariant(v)
+		}
+		s.session.Emit(path, iface+".MediaChanged", out)
+	}
+}
+
+func (s *server) GetMedia() (map[string]dbus.Variant, *dbus.Error) {
+	s.mu.Lock()
+	m := s.media
+	s.mu.Unlock()
+	out := map[string]dbus.Variant{}
+	for k, v := range m.Map() {
+		out[k] = dbus.MakeVariant(v)
+	}
+	return out, nil
+}
+
+func (s *server) mediaCall(method string, args ...any) *dbus.Error {
+	if s.fake {
+		s.mu.Lock()
+		switch method {
+		case "PlayPause":
+			s.fakeMedia.Playing = !s.fakeMedia.Playing
+		case "SetPosition":
+			s.fakeMedia.Position = args[1].(int64)
+		}
+		s.mu.Unlock()
+	} else {
+		s.mu.Lock()
+		player := s.media.Player
+		s.mu.Unlock()
+		if player == "" {
+			return nil
+		}
+		s.session.Object(player, mprisPath).Call("org.mpris.MediaPlayer2.Player."+method, 0, args...)
+	}
+	s.refreshMedia()
+	return nil
+}
+
+func (s *server) MediaPlayPause() *dbus.Error { return s.mediaCall("PlayPause") }
+func (s *server) MediaNext() *dbus.Error      { return s.mediaCall("Next") }
+func (s *server) MediaPrevious() *dbus.Error  { return s.mediaCall("Previous") }
+
+func (s *server) MediaSeek(position int64) *dbus.Error {
+	var track dbus.ObjectPath = "/"
+	if !s.fake {
+		s.mu.Lock()
+		player := s.media.Player
+		s.mu.Unlock()
+		meta, _ := prop[map[string]dbus.Variant](s.session, player, mprisPath, "org.mpris.MediaPlayer2.Player.Metadata")
+		if id, ok := meta["mpris:trackid"].Value().(dbus.ObjectPath); ok {
+			track = id
+		}
+	}
+	return s.mediaCall("SetPosition", track, position)
+}
+
 // ---- Wi-Fi networks and Bluetooth devices -------------------------------------------
 
 type wifiEntry struct {
@@ -474,6 +645,17 @@ func main() {
 	if os.Getenv("CALI_STATUS_FAKE") == "1" {
 		s.fake = true
 		s.fakeStatus, s.fakeNets, s.fakeDevices = status.Fake()
+		// The fake player can be dressed up as a real one for screenshots.
+		s.fakeMedia = status.Media{Player: "org.mpris.MediaPlayer2.fake",
+			Identity: envOr("CALI_STATUS_FAKE_APP", "Music"),
+			Title:    envOr("CALI_STATUS_FAKE_TITLE", "Idiots Laughing at Pigeons"),
+			Artist:   envOr("CALI_STATUS_FAKE_ARTIST", "Cass"),
+			ArtPath:  os.Getenv("CALI_STATUS_FAKE_ART"),
+			Icon:     os.Getenv("CALI_STATUS_FAKE_ICON"),
+			Length:   envMicros("CALI_STATUS_FAKE_LENGTH", 754_000_000),
+			Position: envMicros("CALI_STATUS_FAKE_POSITION", 322_000_000),
+			Playing:  true,
+			Output:   envOr("CALI_STATUS_FAKE_OUTPUT", "Arctis Nova Pro Wireless")}
 		log.Printf("cali-statusd: fake hardware (CALI_STATUS_FAKE=1)")
 	}
 	if system, err := dbus.ConnectSystemBus(); err == nil {
@@ -494,6 +676,7 @@ func main() {
 		log.Fatalf("cali-statusd: %s is already taken (%v)", busName, err)
 	}
 	s.refresh()
+	s.refreshMedia()
 	log.Printf("cali-statusd %s: serving %s", config.Version, busName)
 
 	stop := make(chan os.Signal, 1)
@@ -504,10 +687,25 @@ func main() {
 		select {
 		case <-ticker.C:
 			s.refresh()
+			s.refreshMedia()
 		case <-stop:
 			return
 		case <-session.Context().Done():
 			return
 		}
 	}
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envMicros(key string, fallback int64) int64 {
+	if v, err := strconv.ParseInt(os.Getenv(key), 10, 64); err == nil {
+		return v
+	}
+	return fallback
 }

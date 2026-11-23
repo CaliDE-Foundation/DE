@@ -8,9 +8,8 @@ const ui = @import("ui.zig");
 const status = @import("status.zig");
 const settings = @import("settings.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
-const font = "Adwaita Sans 11";
-const title_font = "Adwaita Sans Bold 11";
 const right_margin: f32 = 14;
 const icon_spacing: f32 = 10;
 const slider_h: f32 = 44;
@@ -30,6 +29,20 @@ var confirming = false;
 /// 0 = main menu, 1 = Wi-Fi networks, 2 = Bluetooth devices.
 var picker: usize = 0;
 var shown_layout: [8]u8 = .{0} ** 8;
+var shown_percent: i32 = -1;
+
+/// Re-applies settings that change the status area.
+pub fn restyle() void {
+    if (icons_box) |box| c.clutter_actor_set_height(box, @floatFromInt(config.panelHeight()));
+    shown_icons = .{null} ** 8; // force a rebuild
+    refreshIcons();
+}
+
+/// Width of the status icons, for placing the clock before them.
+pub fn iconsWidth() f32 {
+    const box = icons_box orelse return 0;
+    return ui.preferredWidth(box) + right_margin;
+}
 
 pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     display = d;
@@ -41,7 +54,7 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     const layout = c.clutter_box_layout_new();
     c.clutter_box_layout_set_spacing(@ptrCast(@alignCast(layout)), @intFromFloat(icon_spacing));
     c.clutter_actor_set_layout_manager(box, layout);
-    c.clutter_actor_set_height(box, @floatFromInt(c.cali_shell_panel_height()));
+    c.clutter_actor_set_height(box, @floatFromInt(@import("config.zig").panelHeight()));
     c.clutter_actor_add_constraint(box, c.clutter_align_constraint_new(p, @intCast(c.CLUTTER_ALIGN_X_AXIS), 1.0));
     c.clutter_actor_set_translation(box, -right_margin, 0, 0);
     c.clutter_actor_set_reactive(box, 1);
@@ -79,8 +92,9 @@ fn refreshIcons() void {
     shown_layout = layout_buf;
 
     c.clutter_actor_destroy_all_children(box);
+    shown_percent = -1;
     if (layout) |text| {
-        const label = ui.label(text, "Adwaita Sans Bold 10");
+        const label = ui.label(text, config.font(.bold, -1));
         c.clutter_actor_set_y_align(label, @intCast(c.CLUTTER_ACTOR_ALIGN_CENTER));
         c.clutter_actor_add_child(box, label);
     }
@@ -89,6 +103,14 @@ fn refreshIcons() void {
         const icon = ui.icon(name, style.status_icon_size, true, 0xffffff);
         c.clutter_actor_set_y_align(icon, @intCast(c.CLUTTER_ACTOR_ALIGN_CENTER));
         c.clutter_actor_add_child(box, icon);
+        // Battery percentage right after the battery icon.
+        if (config.show_battery_percentage and status.current.battery >= 0 and std.mem.startsWith(u8, std.mem.span(name), "battery-")) {
+            var pct: [8]u8 = undefined;
+            const text = std.fmt.bufPrintZ(&pct, "{d}%", .{@as(u32, @intFromFloat(@round(status.current.battery * 100)))}) catch continue;
+            const label = ui.label(text.ptr, config.font(.bold, -1));
+            c.clutter_actor_set_y_align(label, @intCast(c.CLUTTER_ACTOR_ALIGN_CENTER));
+            c.clutter_actor_add_child(box, label);
+        }
     }
 }
 
@@ -138,8 +160,8 @@ fn show(rows: []const Row, quick: bool) void {
     const quick_h: f32 = if (quick) slider_h + 2 * (toggle_h + toggle_gap) + 14 else 0;
     const n: f32 = @floatFromInt(rows.len);
     const height = quick_h + n * style.row_height + 2 * style.padding;
-    const p = ui.roundedRect(style.width, height, style.corner_radius, style.background);
-    const top: f32 = @as(f32, @floatFromInt(c.cali_shell_panel_height())) + 6;
+    const p = ui.roundedRect(style.width, height, config.radius(1), style.background);
+    const top: f32 = @as(f32, @floatFromInt(@import("config.zig").panelHeight())) + 6;
     c.clutter_actor_set_position(p, stage_w - style.width - 8, top);
 
     var y = style.padding;
@@ -171,7 +193,7 @@ fn show(rows: []const Row, quick: bool) void {
         c.clutter_actor_set_position(r, style.padding, y + @as(f32, @floatFromInt(i)) * style.row_height);
         c.clutter_actor_set_size(r, inner_w, style.row_height);
 
-        const text = ui.label(row.label, if (row.bold) title_font else font);
+        const text = ui.label(row.label, if (row.bold) config.font(.bold, 0) else config.font(.regular, 0));
         c.clutter_actor_set_x(text, 14);
         ui.center(text, r, c.CLUTTER_ALIGN_Y_AXIS);
 
@@ -307,7 +329,7 @@ fn addToggle(parent: *c.ClutterActor, x: f32, y: f32, w: f32, label: [*:0]const 
     const icon = ui.icon(icon_name, 16, true, 0xffffff);
     c.clutter_actor_set_position(icon, 16, (toggle_h - 16) / 2);
     c.clutter_actor_add_child(t, icon);
-    const text = ui.label(label, "Adwaita Sans Bold 10");
+    const text = ui.label(label, config.font(.bold, -1));
     c.clutter_actor_set_x(text, 42);
     c.clutter_actor_set_width(text, @min(ui.preferredWidth(text), w - 54));
     ui.center(text, t, c.CLUTTER_ALIGN_Y_AXIS);
@@ -375,19 +397,19 @@ fn showPicker(which: usize) void {
     const rows: f32 = @floatFromInt(@max(count, 1));
     const header_h: f32 = 44;
     const height = header_h + rows * style.row_height + 2 * style.padding;
-    const p = ui.roundedRect(style.width, height, style.corner_radius, style.background);
-    c.clutter_actor_set_position(p, stage_w - style.width - 8, @as(f32, @floatFromInt(c.cali_shell_panel_height())) + 6);
+    const p = ui.roundedRect(style.width, height, config.radius(1), style.background);
+    c.clutter_actor_set_position(p, stage_w - style.width - 8, @as(f32, @floatFromInt(@import("config.zig").panelHeight())) + 6);
 
     const back = ui.iconButton("go-previous-symbolic", 32, &onPickerBack, null);
     c.clutter_actor_set_position(back, style.padding, style.padding + 4);
     c.clutter_actor_add_child(p, back);
-    const title = ui.label(if (which == 1) "Wi-Fi" else "Bluetooth", title_font);
+    const title = ui.label(if (which == 1) "Wi-Fi" else "Bluetooth", config.font(.bold, 0));
     c.clutter_actor_set_position(title, style.padding + 44, style.padding + 4 + (32 - ui.preferredHeight(title)) / 2);
     c.clutter_actor_add_child(p, title);
 
     var y = style.padding + header_h;
     if (count == 0) {
-        const none = ui.label(if (which == 1) "No networks found" else "No paired devices", font);
+        const none = ui.label(if (which == 1) "No networks found" else "No paired devices", config.font(.regular, 0));
         c.clutter_actor_set_opacity(none, 160);
         c.clutter_actor_set_position(none, style.padding + 14, y + (style.row_height - ui.preferredHeight(none)) / 2);
         c.clutter_actor_add_child(p, none);
@@ -406,7 +428,7 @@ fn showPicker(which: usize) void {
         c.clutter_actor_set_position(icon, 12, (style.row_height - 16) / 2);
         c.clutter_actor_add_child(r, icon);
         const name: [*:0]const u8 = if (which == 1) @ptrCast(&status.nets[i].ssid) else @ptrCast(&status.devs[i].name);
-        const label = ui.label(name, if (on) title_font else font);
+        const label = ui.label(name, if (on) config.font(.bold, 0) else config.font(.regular, 0));
         c.clutter_actor_set_x(label, 40);
         c.clutter_actor_set_width(label, @min(ui.preferredWidth(label), inner_w - 110));
         ui.center(label, r, c.CLUTTER_ALIGN_Y_AXIS);

@@ -6,6 +6,7 @@ const plugin = @import("plugin.zig");
 const overview = @import("overview.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const max_apps = 24;
 
@@ -30,7 +31,9 @@ pub fn create(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, left: f32, width: f3
     dock_area = .{ left, width, bottom };
     clear();
     collectApps();
-    const style = c.cali_shell_dock_style();
+    var style = c.cali_shell_dock_style();
+    style.icon_size = config.dock_icon_size;
+    style.corner_radius = config.radius(1.1);
     // One slot per app plus the Show Apps button.
     const n: f32 = @floatFromInt(n_apps + 1);
     const dock_w = n * style.icon_size + (n - 1) * style.spacing + 2 * style.padding;
@@ -51,7 +54,7 @@ pub fn create(d: ?*c.MetaDisplay, parent: ?*c.ClutterActor, left: f32, width: f3
         plugin.connect(button, "leave-event", &onUnhover, null);
         c.clutter_actor_add_child(dock, button);
 
-        if (app.window != null) {
+        if (app.window != null and config.dock_running_dots) {
             const dot = ui.roundedRect(style.running_dot, style.running_dot, style.running_dot / 2, 0xffffffff);
             c.clutter_actor_set_position(dot, x + (style.icon_size - style.running_dot) / 2, dock_h - style.running_dot - 2);
             c.clutter_actor_add_child(dock, dot);

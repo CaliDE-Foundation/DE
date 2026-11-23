@@ -1,0 +1,35 @@
+# Maintainer: CaliDE Foundation
+# Building needs Zig 0.13 exactly (newer Zig changed its build API); get it
+# from the AUR (zig013-bin) or zigup if your zig is newer.
+pkgname=calide-git
+pkgver=r0
+pkgrel=1
+pkgdesc="Cali: a desktop that feels like GNOME and lets you make it yours"
+arch=(x86_64)
+url="https://github.com/CaliDE-Foundation/DE"
+license=(GPL-3.0-or-later)
+depends=(sookie dbus glib2 gtk4 libadwaita pam pipewire wireplumber
+         xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk)
+optdepends=('networkmanager: Wi-Fi and network status'
+            'bluez: Bluetooth'
+            'upower: battery status')
+makedepends=(git rust go zig)
+provides=(calide)
+conflicts=(calide)
+source=("git+https://github.com/CaliDE-Foundation/DE.git")
+sha256sums=(SKIP)
+
+pkgver() {
+  cd DE
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd DE
+  make NICE= JOBS="$(nproc)" compositor-sookie services settings-app
+}
+
+package() {
+  cd DE
+  make install PREFIX=/usr DESTDIR="$pkgdir"
+}

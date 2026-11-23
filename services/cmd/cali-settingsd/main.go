@@ -27,6 +27,7 @@ const (
 const introspection = `<node>
   <interface name="org.calide.Settings">
     <method name="GetAll"><arg direction="out" type="a{sv}"/></method>
+    <method name="GetSchema"><arg direction="out" type="s"/></method>
     <method name="Get"><arg direction="in" type="s" name="key"/><arg direction="out" type="v"/></method>
     <method name="Set"><arg direction="in" type="s" name="key"/><arg direction="in" type="v" name="value"/></method>
     <method name="Reset"><arg direction="in" type="s" name="key"/></method>
@@ -48,6 +49,11 @@ func (s *server) GetAll() (map[string]dbus.Variant, *dbus.Error) {
 		out[k] = dbus.MakeVariant(v)
 	}
 	return out, nil
+}
+
+// GetSchema describes every setting (JSON), so Cali Settings can build its pages.
+func (s *server) GetSchema() (string, *dbus.Error) {
+	return settings.SchemaJSON(), nil
 }
 
 func (s *server) Get(key string) (dbus.Variant, *dbus.Error) {
@@ -79,23 +85,28 @@ func (s *server) Reset(key string) *dbus.Error {
 
 func (s *server) changed(key string) {
 	v, _ := s.store.Get(key)
-	if key == "dark-style" {
-		applyDarkStyle(v == true)
-	}
+	applyGNOME(key, v)
 	if err := s.conn.Emit(path, iface+".Changed", key, dbus.MakeVariant(v)); err != nil {
 		log.Printf("cali-settingsd: emitting Changed: %v", err)
 	}
 }
 
-// applyDarkStyle sets GNOME's color-scheme, which GTK and libadwaita apps follow.
-func applyDarkStyle(dark bool) {
-	scheme := "default"
-	if dark {
-		scheme = "prefer-dark"
+// applyGNOME writes settings that GNOME components read: dark style (GTK and
+// libadwaita apps follow it) and the window settings Sookie reads.
+func applyGNOME(key string, v any) {
+	schema, gkey, text := "", "", ""
+	if key == "dark-style" {
+		schema, gkey, text = "org.gnome.desktop.interface", "color-scheme", "'default'"
+		if v == true {
+			text = "'prefer-dark'"
+		}
+	} else if sch, k, t, ok := settings.GSettingsValue(key, v); ok {
+		schema, gkey, text = sch, k, t
+	} else {
+		return
 	}
-	cmd := exec.Command("gsettings", "set", "org.gnome.desktop.interface", "color-scheme", scheme)
-	if err := cmd.Run(); err != nil {
-		log.Printf("cali-settingsd: setting color-scheme: %v", err)
+	if err := exec.Command("gsettings", "set", schema, gkey, text).Run(); err != nil {
+		log.Printf("cali-settingsd: setting %s %s: %v", schema, gkey, err)
 	}
 }
 
@@ -127,8 +138,9 @@ func main() {
 		log.Fatalf("cali-settingsd: %s is already taken (%v)", busName, err)
 	}
 
-	if v, _ := store.Get("dark-style"); v != nil {
-		applyDarkStyle(v == true)
+	for _, k := range settings.Keys() {
+		v, _ := store.Get(k)
+		applyGNOME(k, v)
 	}
 	log.Printf("cali-settingsd %s: settings in %s", config.Version, file)
 

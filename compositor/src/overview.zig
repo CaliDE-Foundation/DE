@@ -8,13 +8,13 @@ const dock = @import("dock.zig");
 const appgrid = @import("appgrid.zig");
 const ui = @import("ui.zig");
 const c = plugin.c;
+const config = @import("config.zig");
 
 const duration_ms = 250;
 const dim_opacity = 110;
 const margin: f32 = 48.0;
 const max_windows = 64;
 const title_space: f32 = 40.0; // room under each window for its title
-const title_font = "Adwaita Sans 10";
 const close_size: f32 = 28.0;
 
 const State = enum { closed, opening, open, closing };
@@ -56,6 +56,7 @@ var mode: Mode = .windows;
 var query_buf: [256]u8 = undefined;
 var query_len: usize = 0;
 var search_label: ?*c.ClutterActor = null;
+var search_field: ?*c.ClutterActor = null;
 const search_h: f32 = 38;
 const search_w: f32 = 340;
 const search_gap: f32 = 18;
@@ -225,18 +226,21 @@ fn open() void {
     const glass = ui.icon("edit-find-symbolic", 16, true, 0xffffff);
     c.clutter_actor_set_position(glass, 14, (search_h - 16) / 2);
     c.clutter_actor_add_child(field, glass);
-    const text = ui.label(placeholder, "Adwaita Sans 11");
+    const text = ui.label(placeholder, config.font(.regular, 0));
     c.clutter_actor_set_x(text, 40);
     c.clutter_actor_set_width(text, search_w - 56);
     ui.center(text, field, c.CLUTTER_ALIGN_Y_AXIS);
     c.clutter_actor_set_opacity(text, 150);
     c.clutter_actor_add_child(field, text);
     c.clutter_actor_add_child(g, field);
+    // Without the field, typing still searches; the field appears once you type.
+    if (!config.overview_search) c.clutter_actor_set_opacity(field, 0);
+    search_field = field;
     search_label = text;
     query_len = 0;
     mode = .windows;
 
-    const top = work_top + search_gap + search_h;
+    const top = if (config.overview_search) work_top + search_gap + search_h else work_top;
     layout_area = .{
         .x = @as(f32, @floatFromInt(work.x)) + margin,
         .y = top + margin,
@@ -285,7 +289,7 @@ fn open() void {
     relayout();
 
     ease(dm);
-    c.clutter_actor_set_opacity(dm, dim_opacity);
+    c.clutter_actor_set_opacity(dm, @intFromFloat(std.math.clamp(config.overview_dim, 0, 1) * 255));
     c.clutter_actor_restore_easing_state(dm);
     plugin.connect(dm, "transitions-completed", &onDimDone, null);
 
@@ -316,7 +320,7 @@ fn makeCard(parent: ?*c.ClutterActor, actor: *c.ClutterActor, window: *c.MetaWin
     c.clutter_actor_add_child(item, clone);
 
     // Title pill, centered under the window.
-    const text = ui.label(c.meta_window_get_title(window) orelse "", title_font);
+    const text = ui.label(c.meta_window_get_title(window) orelse "", config.font(.regular, -1));
     const text_w = @min(ui.preferredWidth(text), 280);
     const text_h = ui.preferredHeight(text);
     c.clutter_actor_set_width(text, text_w);
@@ -368,7 +372,7 @@ fn relayout() void {
         if (n == 0) continue;
         const area = if (n_monitor_areas == 0) layout_area else monitor_areas[m];
         var targets: [max_windows]c.CaliRect = undefined;
-        const placed = c.cali_shell_overview_layout(area, &rects, n, &targets);
+        const placed = c.cali_shell_overview_layout_gap(area, &rects, n, config.overview_gap, &targets);
         for (which[0..placed], targets[0..placed]) |i, to| {
             animate(entries[i].item, to);
             fade(entries[i].title, 255);
@@ -485,6 +489,7 @@ fn updateQuery() void {
         c.clutter_text_set_text(@ptrCast(@alignCast(l)), text);
         c.clutter_actor_set_opacity(l, if (query_len == 0) 150 else 255);
     }
+    if (search_field) |f| c.clutter_actor_set_opacity(f, if (config.overview_search or query_len > 0) 255 else 0);
     if (query_len > 0) setMode(.search) else if (mode == .search) setMode(.windows);
 }
 

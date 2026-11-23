@@ -13,7 +13,7 @@ PODMAN       ?= podman
 DEV_IMAGE    ?= localhost/calide-dev:fedora45
 
 .PHONY: all shell settings-app compositor compositor-sookie services sookie sookie-fetch \
-        test run smoke-sookie container-image container devkit clean
+        test run smoke-sookie container-image container devkit install uninstall clean
 
 all: compositor services
 
@@ -94,7 +94,7 @@ devkit: container-image
 	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
-	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES -e CALI_DEBUG_APPS -e CALI_DEBUG_SEARCH -e CALI_DEBUG_CALENDAR -e CALI_DEBUG_SWITCHER -e CALI_DEBUG_NOTIFY -e CALI_DEBUG_OSD -e CALI_DEBUG_MINIMIZE -e CALI_DEBUG_CALICTL -e CALI_DEBUG_LOCK -e CALI_DEBUG_UNLOCK -e CALI_DEBUG_SCREENSHOT -e CALI_DEBUG_TILE -e CALI_STATUS_FAKE -e CALI_DEBUG_PICKER -e CALI_DEBUG_APPMENU -e CALI_DEBUG_SECOND_MONITOR -e CALI_DEVKIT_ARGS \
+	  -e CALI_APP="$(CALI_APP)" -e CALI_DEBUG_OVERVIEW -e CALI_DEBUG_OVERVIEW_PICK -e CALI_DEBUG_WORKSPACES -e CALI_DEBUG_MENU -e CALI_DOCK_FAVORITES -e CALI_DEBUG_APPS -e CALI_DEBUG_SEARCH -e CALI_DEBUG_CALENDAR -e CALI_DEBUG_SWITCHER -e CALI_DEBUG_NOTIFY -e CALI_DEBUG_OSD -e CALI_DEBUG_MINIMIZE -e CALI_DEBUG_CALICTL -e CALI_DEBUG_LOCK -e CALI_DEBUG_UNLOCK -e CALI_DEBUG_SCREENSHOT -e CALI_DEBUG_TILE -e CALI_STATUS_FAKE -e CALI_DEBUG_PICKER -e CALI_DEBUG_APPMENU -e CALI_DEBUG_SECOND_MONITOR -e CALI_DEVKIT_ARGS -e CALI_DEBUG_WOBBLE -e CALI_DEBUG_WOBBLE_FREEZE -e CALI_SETTINGS_PAGE -e CALI_SETTINGS_ADVANCED -e CALI_STATUS_FAKE_ART -e CALI_STATUS_FAKE_APP -e CALI_STATUS_FAKE_TITLE -e CALI_STATUS_FAKE_ARTIST -e CALI_STATUS_FAKE_ICON -e CALI_STATUS_FAKE_LENGTH -e CALI_STATUS_FAKE_POSITION \
 	  $(DEV_IMAGE) bash -c '\
 	    set -e; scripts/container-sookie.sh; \
 	    make JOBS=$(JOBS) compositor-sookie-container; \
@@ -110,6 +110,36 @@ compositor-sookie-container:
 	  -Dshell-lib=$$CARGO_TARGET_DIR/release/libcali_shell.a --prefix ../out/container
 smoke-sookie-container:
 	scripts/smoke-sookie.sh out/container/bin/cali-compositor
+
+# ---- Installing ---------------------------------------------------------------
+# For packages: make compositor-sookie services settings-app &&
+#   make install PREFIX=/usr DESTDIR=$pkgdir
+# The Go services must sit next to cali-compositor (it starts them from there).
+PREFIX     ?= /usr/local
+SYSCONFDIR ?= /etc
+BINDIR     := $(DESTDIR)$(PREFIX)/bin
+DATADIR    := $(DESTDIR)$(PREFIX)/share
+BINARIES   := cali-compositor cali-settingsd cali-statusd cali-notifyd calictl
+
+install:
+	@for b in $(BINARIES); do test -x $(OUT)/$$b || { echo "install: $(OUT)/$$b missing; run make compositor-sookie services first"; exit 1; }; done
+	install -d $(BINDIR)
+	for b in $(BINARIES); do install -m755 $(OUT)/$$b $(BINDIR)/; done
+	[ ! -x $(OUT)/cali-settings ] || install -m755 $(OUT)/cali-settings $(BINDIR)/
+	install -m755 scripts/cali-session $(BINDIR)/
+	install -Dm644 data/cali.desktop $(DATADIR)/wayland-sessions/cali.desktop
+	install -Dm644 data/10_calide.gschema.override $(DATADIR)/glib-2.0/schemas/10_calide.gschema.override
+	install -Dm644 data/cali-portals.conf $(DATADIR)/xdg-desktop-portal/cali-portals.conf
+	install -Dm644 data/pam/cali-lock $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock
+	install -Dm644 data/org.calide.Settings.desktop $(DATADIR)/applications/org.calide.Settings.desktop
+	install -Dm644 data/icons/org.calide.Settings.svg $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
+	[ -n "$(DESTDIR)" ] || glib-compile-schemas $(DATADIR)/glib-2.0/schemas
+
+uninstall:
+	for b in $(BINARIES) cali-settings cali-session; do rm -f $(BINDIR)/$$b; done
+	rm -f $(DATADIR)/wayland-sessions/cali.desktop $(DATADIR)/glib-2.0/schemas/10_calide.gschema.override \
+	  $(DATADIR)/xdg-desktop-portal/cali-portals.conf $(DESTDIR)$(SYSCONFDIR)/pam.d/cali-lock \
+	  $(DATADIR)/applications/org.calide.Settings.desktop $(DATADIR)/icons/hicolor/scalable/apps/org.calide.Settings.svg
 
 # ---- Checks -----------------------------------------------------------------
 
