@@ -24,7 +24,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Zig
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
           version: 0.13.0
 
@@ -32,6 +32,7 @@ jobs:
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: services/go.mod
+          cache-dependency-path: services/go.sum
 
       - name: Build
         run: make all
