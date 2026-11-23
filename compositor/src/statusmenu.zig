@@ -27,6 +27,9 @@ var icons_box: ?*c.ClutterActor = null;
 var shown_icons: [8]?[*:0]const u8 = .{null} ** 8;
 var popup: ?*c.ClutterActor = null; // our content while the menu is open
 var confirming = false;
+/// 0 = main menu, 1 = Wi-Fi networks, 2 = Bluetooth devices.
+var picker: usize = 0;
+var shown_layout: [8]u8 = .{0} ** 8;
 
 pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
     display = d;
@@ -57,7 +60,8 @@ pub fn init(d: ?*c.MetaDisplay, s: ?*c.ClutterActor, p: ?*c.ClutterActor) void {
 /// Status or settings changed: update the bar icons and an open menu.
 pub fn refresh() void {
     refreshIcons();
-    if (popup != null and !confirming and !dragging) open();
+    if (popup == null or confirming or dragging) return;
+    if (picker != 0) showPicker(picker) else open();
 }
 
 /// Rebuilds the top bar icons from the current status, if they changed.
@@ -68,10 +72,18 @@ fn refreshIcons() void {
     while (i < names.len) : (i += 1) {
         names[i] = c.cali_shell_status_icons(&status.current, i) orelse break;
     }
-    if (std.mem.eql(?[*:0]const u8, &names, &shown_icons)) return;
+    var layout_buf: [8]u8 = .{0} ** 8;
+    const layout = @import("keyboard.zig").indicator(&layout_buf);
+    if (std.mem.eql(?[*:0]const u8, &names, &shown_icons) and std.mem.eql(u8, &layout_buf, &shown_layout)) return;
     shown_icons = names;
+    shown_layout = layout_buf;
 
     c.clutter_actor_destroy_all_children(box);
+    if (layout) |text| {
+        const label = ui.label(text, "Adwaita Sans Bold 10");
+        c.clutter_actor_set_y_align(label, @intCast(c.CLUTTER_ACTOR_ALIGN_CENTER));
+        c.clutter_actor_add_child(box, label);
+    }
     for (names) |maybe| {
         const name = maybe orelse break;
         const icon = ui.icon(name, style.status_icon_size, true, 0xffffff);
@@ -87,6 +99,11 @@ fn onStatusClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) call
 
 fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {
     if (popup == null) open();
+    // CALI_DEBUG_PICKER=1 (Wi-Fi) or 2 (Bluetooth) opens that list too.
+    if (std.posix.getenv("CALI_DEBUG_PICKER")) |value| {
+        const which: usize = if (std.mem.eql(u8, value, "2")) 2 else 1;
+        _ = onPickerArrow(null, null, @ptrFromInt(which));
+    }
     return 0;
 }
 
@@ -98,6 +115,7 @@ const no_action = 0;
 
 fn open() void {
     confirming = false;
+    picker = 0;
     var rows: [8]Row = undefined;
     var n: usize = 0;
     var action: c.CaliMenuAction = undefined;
@@ -177,6 +195,7 @@ fn show(rows: []const Row, quick: bool) void {
 fn onClosed() void {
     popup = null;
     confirming = false;
+    picker = 0;
 }
 
 pub fn close() void {
@@ -296,6 +315,17 @@ fn addToggle(parent: *c.ClutterActor, x: f32, y: f32, w: f32, label: [*:0]const 
     if (available) {
         c.clutter_actor_set_reactive(t, 1);
         plugin.connect(t, "button-release-event", &onToggle, @ptrFromInt(which));
+        // Wi-Fi and Bluetooth: an arrow on the right opens the list.
+        if (which == 1 or which == 2) {
+            const arrow = ui.roundedRect(toggle_h - 8, toggle_h - 8, (toggle_h - 8) / 2, 0x0000002a);
+            c.clutter_actor_set_position(arrow, w - toggle_h + 4, 4);
+            const glyph = ui.icon("go-next-symbolic", 14, true, 0xffffff);
+            ui.center(glyph, arrow, c.CLUTTER_ALIGN_BOTH);
+            c.clutter_actor_add_child(arrow, glyph);
+            c.clutter_actor_set_reactive(arrow, 1);
+            plugin.connect(arrow, "button-release-event", &onPickerArrow, @ptrFromInt(which));
+            c.clutter_actor_add_child(t, arrow);
+        }
     } else {
         c.clutter_actor_set_opacity(t, 110);
     }
@@ -313,6 +343,113 @@ fn onToggle(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv
         else => {},
     }
     open(); // redraw with the new state right away
+    return 1;
+}
+
+// ---- Wi-Fi / Bluetooth pickers ---------------------------------------------------------------
+
+fn onPickerArrow(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv(.C) c.gboolean {
+    const which = @intFromPtr(data);
+    if (which == 1) status.fetchWifi() else status.fetchBluetooth();
+    showPicker(which);
+    return 1; // don't also flip the toggle
+}
+
+fn signalIcon(strength: u8) [*:0]const u8 {
+    if (strength >= 75) return "network-wireless-signal-excellent-symbolic";
+    if (strength >= 50) return "network-wireless-signal-good-symbolic";
+    if (strength >= 25) return "network-wireless-signal-ok-symbolic";
+    return "network-wireless-signal-weak-symbolic";
+}
+
+/// A list page in place of the main menu: Wi-Fi networks or Bluetooth devices.
+fn showPicker(which: usize) void {
+    const s = stage orelse return;
+    picker = which;
+    var stage_w: f32 = 0;
+    var stage_h: f32 = 0;
+    c.clutter_actor_get_size(s, &stage_w, &stage_h);
+
+    const inner_w = style.width - 2 * style.padding;
+    const count = if (which == 1) status.n_nets else status.n_devs;
+    const rows: f32 = @floatFromInt(@max(count, 1));
+    const header_h: f32 = 44;
+    const height = header_h + rows * style.row_height + 2 * style.padding;
+    const p = ui.roundedRect(style.width, height, style.corner_radius, style.background);
+    c.clutter_actor_set_position(p, stage_w - style.width - 8, @as(f32, @floatFromInt(c.cali_shell_panel_height())) + 6);
+
+    const back = ui.iconButton("go-previous-symbolic", 32, &onPickerBack, null);
+    c.clutter_actor_set_position(back, style.padding, style.padding + 4);
+    c.clutter_actor_add_child(p, back);
+    const title = ui.label(if (which == 1) "Wi-Fi" else "Bluetooth", title_font);
+    c.clutter_actor_set_position(title, style.padding + 44, style.padding + 4 + (32 - ui.preferredHeight(title)) / 2);
+    c.clutter_actor_add_child(p, title);
+
+    var y = style.padding + header_h;
+    if (count == 0) {
+        const none = ui.label(if (which == 1) "No networks found" else "No paired devices", font);
+        c.clutter_actor_set_opacity(none, 160);
+        c.clutter_actor_set_position(none, style.padding + 14, y + (style.row_height - ui.preferredHeight(none)) / 2);
+        c.clutter_actor_add_child(p, none);
+    }
+    for (0..count) |i| {
+        const r = c.clutter_actor_new();
+        c.clutter_actor_set_position(r, style.padding, y);
+        c.clutter_actor_set_size(r, inner_w, style.row_height);
+        const hover = ui.roundedRect(inner_w, style.row_height, 10, style.hover);
+        c.clutter_actor_set_opacity(hover, 0);
+        c.clutter_actor_add_child(r, hover);
+
+        const on = if (which == 1) status.nets[i].active else status.devs[i].connected;
+        const icon_name: [*:0]const u8 = if (which == 1) signalIcon(status.nets[i].strength) else "bluetooth-active-symbolic";
+        const icon = ui.icon(icon_name, 16, true, 0xffffff);
+        c.clutter_actor_set_position(icon, 12, (style.row_height - 16) / 2);
+        c.clutter_actor_add_child(r, icon);
+        const name: [*:0]const u8 = if (which == 1) @ptrCast(&status.nets[i].ssid) else @ptrCast(&status.devs[i].name);
+        const label = ui.label(name, if (on) title_font else font);
+        c.clutter_actor_set_x(label, 40);
+        c.clutter_actor_set_width(label, @min(ui.preferredWidth(label), inner_w - 110));
+        ui.center(label, r, c.CLUTTER_ALIGN_Y_AXIS);
+        c.clutter_actor_add_child(r, label);
+
+        var right = inner_w - 30;
+        if (on) {
+            const check = ui.icon("object-select-symbolic", 16, true, 0xffffff);
+            c.clutter_actor_set_position(check, right, (style.row_height - 16) / 2);
+            c.clutter_actor_add_child(r, check);
+            right -= 26;
+        }
+        if (which == 1 and status.nets[i].secured) {
+            const padlock = ui.icon("channel-secure-symbolic", 14, true, 0xffffff);
+            c.clutter_actor_set_opacity(padlock, 170);
+            c.clutter_actor_set_position(padlock, right, (style.row_height - 14) / 2);
+            c.clutter_actor_add_child(r, padlock);
+        }
+
+        c.clutter_actor_set_reactive(r, 1);
+        plugin.connect(r, "enter-event", &onRowEnter, hover);
+        plugin.connect(r, "leave-event", &onRowLeave, hover);
+        plugin.connect(r, "button-release-event", &onPickerRow, @ptrFromInt(i + 1));
+        c.clutter_actor_add_child(p, r);
+        y += style.row_height;
+    }
+
+    if (popup == null) ui.openPopup(p, &onClosed) else ui.setPopupContent(p);
+    popup = p;
+}
+
+fn onPickerBack(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
+    open();
+    return 1;
+}
+
+fn onPickerRow(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv(.C) c.gboolean {
+    const i = @intFromPtr(data) - 1;
+    if (picker == 1 and i < status.n_nets) {
+        if (!status.nets[i].active) status.connectWifi(@ptrCast(&status.nets[i].ssid));
+    } else if (picker == 2 and i < status.n_devs) {
+        status.setDeviceConnected(@ptrCast(&status.devs[i].path), !status.devs[i].connected);
+    }
     return 1;
 }
 

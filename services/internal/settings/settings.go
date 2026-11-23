@@ -45,6 +45,11 @@ var Schema = map[string]Setting{
 	"clock-show-seconds": {Kind: Bool, Default: false, Help: "Show seconds in the top bar clock"},
 	"hot-corner":         {Kind: Bool, Default: true, Help: "Open the overview from the top-left corner"},
 	"animation-speed":    {Kind: Number, Default: 1.0, Min: 0, Max: 3, Help: "Animation speed (0 turns animations off)"},
+	"do-not-disturb":   {Kind: Bool, Default: false, Help: "Hide notification banners (they still go in the list)"},
+	"idle-delay":       {Kind: Number, Default: 5.0, Min: 0, Max: 120, Help: "Minutes of inactivity before the screen blanks (0 = never)"},
+	"lock-on-idle":     {Kind: Bool, Default: true, Help: "Lock the screen when it blanks"},
+	"wallpaper":        {Kind: String, Default: "cali-dusk", Help: "A built-in gradient (cali-dusk, cali-day, cali-night, cali-forest) or an image path"},
+	"keyboard-layouts": {Kind: StringList, Default: []string{"us"}, Help: "Keyboard layouts (xkb names, e.g. us,de); Super+Space switches"},
 	"dock-favorites": {Kind: StringList, Default: []string{
 		"org.gnome.Nautilus.desktop", "firefox.desktop", "org.gnome.TextEditor.desktop",
 		"org.gnome.Console.desktop", "org.gnome.Software.desktop", "org.gnome.Settings.desktop",

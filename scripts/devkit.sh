@@ -9,6 +9,12 @@ set -euo pipefail
 BIN=${1:-out/container/bin/cali-compositor}
 APP=${CALI_APP:-gnome-text-editor}
 
+# CALI_DEBUG_UNLOCK=<password>: give the container's user that password,
+# so the lock screen test can unlock with it.
+if [ -n "${CALI_DEBUG_UNLOCK:-}" ]; then
+  echo "$(id -un):$CALI_DEBUG_UNLOCK" | chpasswd
+fi
+
 export XDG_RUNTIME_DIR=/tmp/cali-runtime
 rm -rf "$XDG_RUNTIME_DIR"
 mkdir -m 700 -p "$XDG_RUNTIME_DIR"
@@ -22,6 +28,7 @@ fi
 # the picture over PipeWire, so PipeWire and WirePlumber run inside it too.
 exec dbus-run-session -- bash -c '
   set -u
+  echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/cali-bus   # for debugging from outside
   pipewire >/tmp/pipewire.log 2>&1 &
   wireplumber >/tmp/wireplumber.log 2>&1 &
   sleep 1
@@ -61,5 +68,5 @@ exec dbus-run-session -- bash -c '
     wait
   ) &
 
-  exec "$0" --wayland --devkit --no-x11
+  exec "$0" --wayland --devkit --no-x11 ${CALI_DEVKIT_ARGS:-}
 ' "$BIN" "$APP"

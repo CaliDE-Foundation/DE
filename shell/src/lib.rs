@@ -6,6 +6,10 @@
 use std::ffi::{c_char, CStr};
 
 mod calendar;
+mod capture;
+mod keyboard;
+mod lock;
+mod wallpaper;
 mod dock;
 mod draw;
 mod search;
@@ -165,6 +169,182 @@ pub unsafe extern "C" fn cali_shell_search_score(query: *const c_char, text: *co
     let q = unsafe { CStr::from_ptr(query) }.to_string_lossy();
     let t = unsafe { CStr::from_ptr(text) }.to_string_lossy();
     search::score(&q, &t).map_or(-1, |s| s as i32)
+}
+
+// ---- Screenshots -------------------------------------------------------------------
+
+/// Writes the path for a new screenshot (in Pictures/Screenshots, created
+/// if needed) into `buf`. Returns its length, 0 on failure.
+///
+/// # Safety
+/// `buf` must point to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_screenshot_path(buf: *mut c_char, len: usize) -> usize {
+    if buf.is_null() || len == 0 {
+        return 0;
+    }
+    let stamp = panel::format_date(None, c"%Y-%m-%d %H-%M-%S");
+    match capture::screenshot_path(&stamp) {
+        Some(p) => write_c_string(&p.to_string_lossy(), buf, len),
+        None => 0,
+    }
+}
+
+/// Saves premultiplied RGBA pixels as a PNG at `path`.
+///
+/// # Safety
+/// `path` must be a C string and `data` must hold `stride * height` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_save_png(path: *const c_char, width: u32, height: u32, stride: usize, data: *const u8) -> bool {
+    if path.is_null() || data.is_null() {
+        return false;
+    }
+    let path = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
+    let data = unsafe { std::slice::from_raw_parts(data, stride * height as usize) };
+    capture::save_png(std::path::Path::new(&path), width, height, stride, data)
+}
+
+// ---- Lock screen ---------------------------------------------------------------------
+
+extern "C" {
+    fn getuid() -> u32;
+    fn getpwuid(uid: u32) -> *const *const c_char; // struct passwd starts with pw_name
+}
+
+/// The logged-in user's name.
+pub fn current_user() -> String {
+    if let Ok(user) = std::env::var("USER") {
+        if !user.is_empty() {
+            return user;
+        }
+    }
+    unsafe {
+        let pw = getpwuid(getuid());
+        if pw.is_null() || (*pw).is_null() {
+            return String::new();
+        }
+        CStr::from_ptr(*pw).to_string_lossy().into_owned()
+    }
+}
+
+/// Writes the current user's name into `buf`.
+///
+/// # Safety
+/// `buf` must point to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_current_user(buf: *mut c_char, len: usize) -> usize {
+    if buf.is_null() || len == 0 {
+        return 0;
+    }
+    write_c_string(&current_user(), buf, len)
+}
+
+/// Starts checking the user's password in the background (PAM).
+/// Returns false if a check is already running.
+///
+/// # Safety
+/// `password` must be a valid C string.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_auth_start(password: *const c_char) -> bool {
+    if password.is_null() {
+        return false;
+    }
+    let password = unsafe { CStr::from_ptr(password) }.to_string_lossy().into_owned();
+    lock::start(current_user(), password)
+}
+
+/// -1 while checking, 1 = correct, 0 = wrong (each reported once), -2 idle.
+#[no_mangle]
+pub extern "C" fn cali_shell_auth_poll() -> i32 {
+    lock::poll()
+}
+
+// ---- Wallpaper ----------------------------------------------------------------------
+
+/// If `name` is a built-in gradient, writes its colors (0xRRGGBBAA) and
+/// returns true.
+///
+/// # Safety
+/// `name` must be NULL or a C string; `top`/`bottom` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_wallpaper_gradient(name: *const c_char, top: *mut u32, bottom: *mut u32) -> bool {
+    if name.is_null() || top.is_null() || bottom.is_null() {
+        return false;
+    }
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+    match wallpaper::gradient(&name) {
+        Some((t, b)) => {
+            unsafe {
+                *top = t;
+                *bottom = b;
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// Loads a PNG/JPEG as premultiplied RGBA. Returns the pixels (free with
+/// `cali_shell_free_image`) and writes the size, or NULL on failure.
+///
+/// # Safety
+/// `path` must be a C string; `width`/`height` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_load_image(path: *const c_char, width: *mut u32, height: *mut u32) -> *mut u8 {
+    if path.is_null() || width.is_null() || height.is_null() {
+        return std::ptr::null_mut();
+    }
+    let path = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
+    let Some((w, h, pixels)) = wallpaper::load(std::path::Path::new(&path)) else {
+        return std::ptr::null_mut();
+    };
+    unsafe {
+        *width = w;
+        *height = h;
+    }
+    Box::into_raw(pixels.into_boxed_slice()) as *mut u8
+}
+
+/// Frees pixels from `cali_shell_load_image` (`len` = width * height * 4).
+///
+/// # Safety
+/// `pixels` must come from `cali_shell_load_image` with that size.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_free_image(pixels: *mut u8, len: usize) {
+    if !pixels.is_null() {
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(pixels, len)) });
+    }
+}
+
+// ---- Keyboard and folders --------------------------------------------------------------
+
+/// The top bar's short name for an xkb layout ("us" -> "en").
+///
+/// # Safety
+/// `layout` must be a C string; `buf` must point to `len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_layout_short_name(layout: *const c_char, buf: *mut c_char, len: usize) -> usize {
+    if layout.is_null() || buf.is_null() || len == 0 {
+        return 0;
+    }
+    let name = keyboard::short_name(&unsafe { CStr::from_ptr(layout) }.to_string_lossy());
+    write_c_string(&name, buf, len)
+}
+
+/// The app grid folder ("Utilities", "System") for desktop Categories, or NULL.
+///
+/// # Safety
+/// `categories` must be NULL or a C string.
+#[no_mangle]
+pub unsafe extern "C" fn cali_shell_app_folder(categories: *const c_char) -> *const c_char {
+    if categories.is_null() {
+        return std::ptr::null();
+    }
+    match keyboard::folder(&unsafe { CStr::from_ptr(categories) }.to_string_lossy()) {
+        Some("System") => c"System".as_ptr(),
+        Some(_) => c"Utilities".as_ptr(),
+        None => std::ptr::null(),
+    }
 }
 
 /// Copies `text` into `buf` as a C string, truncating at a character

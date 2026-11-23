@@ -85,6 +85,8 @@ func (s *server) Notify(app string, replaces uint32, appIcon, summary, body stri
 
 func (s *server) CloseNotification(id uint32) *dbus.Error {
 	if s.store.Remove(id) {
+		// The app withdrew it: take it out of the shell's list too.
+		s.shell.Go(shellName+".RemoveNotification", dbus.FlagNoReplyExpected, nil, id)
 		s.hide(id, notify.ClosedByCall)
 	}
 	return nil
@@ -94,6 +96,8 @@ func (s *server) expired(id uint32) {
 	s.hide(id, notify.ClosedExpired)
 }
 
+// hide takes the banner down; the notification stays in the shell's list
+// until the user clears it (or the app withdraws it).
 func (s *server) hide(id, reason uint32) {
 	s.shell.Go(shellName+".HideNotification", dbus.FlagNoReplyExpected, nil, id)
 	if err := s.conn.Emit(path, iface+".NotificationClosed", id, reason); err != nil {

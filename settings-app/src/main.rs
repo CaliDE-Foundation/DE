@@ -77,6 +77,78 @@ impl Settings {
     }
 }
 
+/// Built-in wallpapers: (setting value, label). The last entry is a picked image.
+const WALLPAPERS: [(&str, &str); 4] = [
+    ("cali-dusk", "Dusk"),
+    ("cali-day", "Day"),
+    ("cali-night", "Night"),
+    ("cali-forest", "Forest"),
+];
+
+fn list_row(settings: &Settings, values: &HashMap<String, glib::Variant>, key: &'static str, title: &str, subtitle: &str) -> adw::EntryRow {
+    let row = adw::EntryRow::builder().title(title).show_apply_button(true).build();
+    let list = values.get(key).and_then(|v| v.get::<Vec<String>>()).unwrap_or_default();
+    row.set_text(&list.join(", "));
+    row.set_tooltip_text(Some(subtitle));
+    let settings = settings.clone();
+    row.connect_apply(move |row| {
+        let items: Vec<String> = row.text().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        settings.set(key, items.to_variant());
+    });
+    row
+}
+
+fn wallpaper_group(settings: &Settings, values: &HashMap<String, glib::Variant>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Background").build();
+    let mut labels: Vec<&str> = WALLPAPERS.iter().map(|(_, l)| *l).collect();
+    labels.push("Custom Image");
+    let combo = adw::ComboRow::builder().title("Wallpaper").model(&gtk::StringList::new(&labels)).build();
+    let current = values.get("wallpaper").and_then(|v| v.get::<String>()).unwrap_or_default();
+    let custom = WALLPAPERS.len() as u32;
+    combo.set_selected(WALLPAPERS.iter().position(|(v, _)| *v == current).map(|i| i as u32).unwrap_or(custom));
+    if !current.is_empty() && !current.starts_with("cali-") {
+        combo.set_subtitle(&current);
+    }
+
+    let pick = gtk::Button::builder().label("Choose Image\u{2026}").valign(gtk::Align::Center).build();
+    {
+        let settings = settings.clone();
+        let combo = combo.clone();
+        pick.connect_clicked(move |button| {
+            let filter = gtk::FileFilter::new();
+            filter.set_name(Some("Images"));
+            filter.add_mime_type("image/png");
+            filter.add_mime_type("image/jpeg");
+            let filters = gio::ListStore::new::<gtk::FileFilter>();
+            filters.append(&filter);
+            let dialog = gtk::FileDialog::builder().title("Choose a Wallpaper").filters(&filters).build();
+            let window = button.root().and_downcast::<gtk::Window>();
+            let settings = settings.clone();
+            let combo = combo.clone();
+            dialog.open(window.as_ref(), None::<&gio::Cancellable>, move |result| {
+                if let Some(path) = result.ok().and_then(|f| f.path()) {
+                    let path = path.to_string_lossy().to_string();
+                    settings.set("wallpaper", path.to_variant());
+                    combo.set_subtitle(&path);
+                    combo.set_selected(WALLPAPERS.len() as u32);
+                }
+            });
+        });
+    }
+    combo.add_suffix(&pick);
+    {
+        let settings = settings.clone();
+        combo.connect_selected_notify(move |row| {
+            if let Some((value, _)) = WALLPAPERS.get(row.selected() as usize) {
+                settings.set("wallpaper", value.to_variant());
+                row.set_subtitle("");
+            }
+        });
+    }
+    group.add(&combo);
+    group
+}
+
 fn switch_row(settings: &Settings, values: &HashMap<String, glib::Variant>, key: &'static str, title: &str, subtitle: &str) -> adw::SwitchRow {
     let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).build();
     row.set_active(values.get(key).and_then(|v| v.get::<bool>()).unwrap_or(false));
@@ -146,6 +218,7 @@ fn settings_page(settings: &Settings, values: &HashMap<String, glib::Variant>) -
     }
     appearance.add(&speed);
     page.add(&appearance);
+    page.add(&wallpaper_group(settings, values));
 
     // Top bar
     let bar = adw::PreferencesGroup::builder().title("Top Bar").build();
@@ -157,6 +230,33 @@ fn settings_page(settings: &Settings, values: &HashMap<String, glib::Variant>) -
     let behavior = adw::PreferencesGroup::builder().title("Behavior").build();
     behavior.add(&switch_row(settings, values, "hot-corner", "Hot Corner", "Open the overview by pushing the pointer into the top-left corner"));
     page.add(&behavior);
+
+    // Notifications
+    let notify = adw::PreferencesGroup::builder().title("Notifications").build();
+    notify.add(&switch_row(settings, values, "do-not-disturb", "Do Not Disturb", "Hide banners; notifications still go in the list under the clock"));
+    page.add(&notify);
+
+    // Screen and lock
+    let screen = adw::PreferencesGroup::builder().title("Screen").build();
+    let idle = adw::SpinRow::with_range(0.0, 120.0, 1.0);
+    idle.set_title("Blank Screen After");
+    idle.set_subtitle("Minutes without input (0 = never)");
+    idle.set_value(values.get("idle-delay").and_then(|v| v.get::<f64>()).unwrap_or(5.0));
+    {
+        let settings = settings.clone();
+        idle.connect_value_notify(move |row| settings.set("idle-delay", row.value().to_variant()));
+    }
+    screen.add(&idle);
+    screen.add(&switch_row(settings, values, "lock-on-idle", "Lock When Blank", "Ask for your password after the screen blanks (Super+L locks any time)"));
+    page.add(&screen);
+
+    // Keyboard
+    let keyboard = adw::PreferencesGroup::builder()
+        .title("Keyboard")
+        .description("Layouts by xkb name, separated by commas (for example: us, de, fr). Super+Space switches.")
+        .build();
+    keyboard.add(&list_row(settings, values, "keyboard-layouts", "Layouts", "us, de, us+dvorak, ..."));
+    page.add(&keyboard);
 
     // Dock
     let dock = adw::PreferencesGroup::builder()

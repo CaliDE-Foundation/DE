@@ -239,3 +239,77 @@ pub fn iconButton(name: [*:0]const u8, size: f32, handler: anytype, data: c.gpoi
     plugin.connect(button, "button-release-event", handler, data);
     return button;
 }
+
+// ---- Context menus ------------------------------------------------------------------------
+
+pub const MenuCallback = *const fn (index: usize) void;
+var menu_callback: ?MenuCallback = null;
+
+/// A small menu at (x, y) with `labels`; `callback` gets the chosen index.
+pub fn menu(x: f32, y: f32, labels: []const [*:0]const u8, callback: MenuCallback) void {
+    const s = stage orelse return;
+    const row_h: f32 = 36;
+    const pad: f32 = 6;
+    var w: f32 = 160;
+    for (labels) |l| {
+        const probe = label(l, "Adwaita Sans 11");
+        w = @max(w, preferredWidth(probe) + 40);
+        c.clutter_actor_destroy(probe);
+    }
+    const h = @as(f32, @floatFromInt(labels.len)) * row_h + 2 * pad;
+    var sw: f32 = 0;
+    var sh: f32 = 0;
+    c.clutter_actor_get_size(s, &sw, &sh);
+
+    const card = roundedRect(w, h, 14, 0x2e2e32f8);
+    c.clutter_actor_set_position(card, @min(x, sw - w - 4), @min(y, sh - h - 4));
+    for (labels, 0..) |l, i| {
+        const row = c.clutter_actor_new();
+        c.clutter_actor_set_position(row, pad, pad + @as(f32, @floatFromInt(i)) * row_h);
+        c.clutter_actor_set_size(row, w - 2 * pad, row_h);
+        const hover = roundedRect(w - 2 * pad, row_h, 9, 0xffffff1f);
+        c.clutter_actor_set_opacity(hover, 0);
+        c.clutter_actor_add_child(row, hover);
+        const text = label(l, "Adwaita Sans 11");
+        c.clutter_actor_set_x(text, 14);
+        center(text, row, c.CLUTTER_ALIGN_Y_AXIS);
+        c.clutter_actor_add_child(row, text);
+        c.clutter_actor_set_reactive(row, 1);
+        plugin.connect(row, "enter-event", &onMenuEnter, hover);
+        plugin.connect(row, "leave-event", &onMenuLeave, hover);
+        plugin.connect(row, "button-release-event", &onMenuRow, @ptrFromInt(i + 1));
+        c.clutter_actor_add_child(card, row);
+    }
+    menu_callback = callback;
+    openPopup(card, null);
+}
+
+fn onMenuRow(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, data: c.gpointer) callconv(.C) c.gboolean {
+    const cb = menu_callback;
+    closePopup();
+    if (cb) |f| f(@intFromPtr(data) - 1);
+    return 1;
+}
+
+fn onMenuEnter(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, hover: c.gpointer) callconv(.C) c.gboolean {
+    c.clutter_actor_set_opacity(@ptrCast(@alignCast(hover)), 255);
+    return 0;
+}
+
+fn onMenuLeave(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, hover: c.gpointer) callconv(.C) c.gboolean {
+    c.clutter_actor_set_opacity(@ptrCast(@alignCast(hover)), 0);
+    return 0;
+}
+
+/// Where a pointer event happened, in stage coordinates.
+pub fn eventPosition(event: ?*c.ClutterEvent) [2]f32 {
+    var x: f32 = 0;
+    var y: f32 = 0;
+    c.clutter_event_get_coords(event, &x, &y);
+    return .{ x, y };
+}
+
+/// Right mouse button?
+pub fn isSecondary(event: ?*c.ClutterEvent) bool {
+    return c.clutter_event_get_button(event) == 3;
+}

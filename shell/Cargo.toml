@@ -14,3 +14,5 @@ crate-type = ["staticlib", "rlib"]
 # App and status icons. No text support needed (icons don't use fonts).
 resvg = { version = "0.45.1", default-features = false }
 tiny-skia = "0.11.4"
+# JPEG wallpapers (PNG goes through tiny-skia).
+jpeg-decoder = { version = "0.3.1", default-features = false }

@@ -156,3 +156,82 @@ fn onBrightnessReply(_: ?*c.GObject, result: ?*c.GAsyncResult, _: c.gpointer) ca
     current.brightness = level;
     osd.show("display-brightness-symbolic", level);
 }
+
+// ---- Wi-Fi networks and Bluetooth devices (for the quick settings pickers) ------------
+
+pub const Net = struct { ssid: [64]u8, strength: u8, active: bool, secured: bool };
+pub const Dev = struct { name: [64]u8, path: [160]u8, connected: bool };
+pub var nets: [16]Net = undefined;
+pub var n_nets: usize = 0;
+pub var devs: [16]Dev = undefined;
+pub var n_devs: usize = 0;
+
+fn copyZ(out: []u8, src: [*c]const u8) void {
+    const s = std.mem.span(src);
+    const n = @min(s.len, out.len - 1);
+    @memcpy(out[0..n], s[0..n]);
+    out[n] = 0;
+}
+
+pub fn fetchWifi() void {
+    bus.call(dest, path, iface, "ListWifiNetworks", null, &onWifiList, null);
+}
+
+fn onWifiList(_: ?*c.GObject, result: ?*c.GAsyncResult, _: c.gpointer) callconv(.C) void {
+    const reply = bus.finish(result) orelse return;
+    defer c.g_variant_unref(reply);
+    var iter: ?*c.GVariantIter = null;
+    c.g_variant_get(reply, "(a(sybb))", &iter);
+    defer c.g_variant_iter_free(iter);
+    n_nets = 0;
+    var ssid: [*c]const u8 = null;
+    var strength: u8 = 0;
+    var active: c.gboolean = 0;
+    var secured: c.gboolean = 0;
+    while (n_nets < nets.len and c.g_variant_iter_next(iter, "(&sybb)", &ssid, &strength, &active, &secured) != 0) {
+        copyZ(&nets[n_nets].ssid, ssid);
+        nets[n_nets].strength = strength;
+        nets[n_nets].active = active != 0;
+        nets[n_nets].secured = secured != 0;
+        n_nets += 1;
+    }
+    @import("statusmenu.zig").refresh();
+}
+
+pub fn fetchBluetooth() void {
+    bus.call(dest, path, iface, "ListBluetoothDevices", null, &onDeviceList, null);
+}
+
+fn onDeviceList(_: ?*c.GObject, result: ?*c.GAsyncResult, _: c.gpointer) callconv(.C) void {
+    const reply = bus.finish(result) orelse return;
+    defer c.g_variant_unref(reply);
+    var iter: ?*c.GVariantIter = null;
+    c.g_variant_get(reply, "(a(ssbb))", &iter);
+    defer c.g_variant_iter_free(iter);
+    n_devs = 0;
+    var name: [*c]const u8 = null;
+    var dpath: [*c]const u8 = null;
+    var paired: c.gboolean = 0;
+    var connected: c.gboolean = 0;
+    while (n_devs < devs.len and c.g_variant_iter_next(iter, "(&s&sbb)", &name, &dpath, &paired, &connected) != 0) {
+        copyZ(&devs[n_devs].name, name);
+        copyZ(&devs[n_devs].path, dpath);
+        devs[n_devs].connected = connected != 0;
+        n_devs += 1;
+    }
+    @import("statusmenu.zig").refresh();
+}
+
+pub fn connectWifi(ssid: [*:0]const u8) void {
+    bus.call(dest, path, iface, "ConnectWifi", c.g_variant_new("(s)", ssid), &onChangedReply, @ptrFromInt(1));
+}
+
+pub fn setDeviceConnected(dev_path: [*:0]const u8, on: bool) void {
+    bus.call(dest, path, iface, "SetBluetoothDeviceConnected", c.g_variant_new("(sb)", dev_path, @as(c.gboolean, @intFromBool(on))), &onChangedReply, @ptrFromInt(2));
+}
+
+/// After connecting something, re-read the list it came from.
+fn onChangedReply(_: ?*c.GObject, result: ?*c.GAsyncResult, which: c.gpointer) callconv(.C) void {
+    if (bus.finish(result)) |reply| c.g_variant_unref(reply);
+    if (@intFromPtr(which) == 1) fetchWifi() else fetchBluetooth();
+}

@@ -14,6 +14,10 @@ const notifications = @import("notifications.zig");
 const settings = @import("settings.zig");
 const status = @import("status.zig");
 const osd = @import("osd.zig");
+const session = @import("session.zig");
+const lock = @import("lock.zig");
+const screenshot = @import("screenshot.zig");
+const keyboard = @import("keyboard.zig");
 
 pub const c = @cImport({
     @cDefine("CLUTTER_ENABLE_EXPERIMENTAL_API", "1");
@@ -89,6 +93,9 @@ fn classInit(klass: c.gpointer, _: c.gpointer) callconv(.C) void {
     k.map = &map;
     k.kill_window_effects = &killWindowEffects;
     k.destroy = &destroy;
+    k.show_tile_preview = &showTilePreview;
+    k.hide_tile_preview = &hideTilePreview;
+    k.keybinding_filter = &keybindingFilter;
     k.minimize = &minimize;
     k.unminimize = &unminimize;
     k.switch_workspace = &workspaces.switchWorkspace;
@@ -109,6 +116,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     c.clutter_actor_insert_child_below(c.meta_compositor_get_window_group(compositor), group, null);
     background_group = group;
 
+    session.init();
     ui.init(stage);
     createPanel(stage);
     overview.init(d, stage, panel);
@@ -119,7 +127,20 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     notifications.init(stage);
     osd.init(stage);
     status.init(d);
+    lock.init(d, stage, panel);
+    screenshot.init(d, stage);
+    keyboard.init(d);
     settings.init();
+
+    // CALI_DEBUG_SECOND_MONITOR=<seconds>: move the focused window to monitor 2.
+    if (std.posix.getenv("CALI_DEBUG_SECOND_MONITOR")) |value| {
+        const seconds = std.fmt.parseInt(c_uint, value, 10) catch 3;
+        _ = c.g_timeout_add_seconds(seconds, &debugSecondMonitor, null);
+    }
+    if (std.posix.getenv("CALI_DEBUG_TILE")) |value| {
+        const seconds = std.fmt.parseInt(c_uint, value, 10) catch 3;
+        _ = c.g_timeout_add_seconds(seconds, &debugTile, null);
+    }
 
     if (std.posix.getenv("CALI_DEBUG_MINIMIZE")) |value| {
         const seconds = std.fmt.parseInt(c_uint, value, 10) catch 3;
@@ -161,10 +182,15 @@ pub fn fillBackground(group: *c.ClutterActor) void {
         c.clutter_actor_set_position(actor, @floatFromInt(rect.x), @floatFromInt(rect.y));
         c.clutter_actor_set_size(actor, @floatFromInt(rect.width), @floatFromInt(rect.height));
 
-        var top = background_top;
-        var bottom = background_bottom;
         const background = c.meta_background_new(d);
-        c.meta_background_set_gradient(background, @intCast(c.G_DESKTOP_BACKGROUND_SHADING_VERTICAL), &top, &bottom);
+        if (wallpaper_texture) |texture| {
+            const color_state = c.clutter_context_get_default_color_state(c.clutter_actor_get_context(group));
+            c.meta_background_set_texture(background, texture, @intCast(c.G_DESKTOP_BACKGROUND_STYLE_ZOOM), color_state);
+        } else {
+            var top = wallpaper_top;
+            var bottom = wallpaper_bottom;
+            c.meta_background_set_gradient(background, @intCast(c.G_DESKTOP_BACKGROUND_SHADING_VERTICAL), &top, &bottom);
+        }
 
         const content: *c.MetaBackgroundContent = @ptrCast(@alignCast(c.clutter_actor_get_content(actor)));
         c.meta_background_content_set_background(content, background);
@@ -176,7 +202,141 @@ pub fn fillBackground(group: *c.ClutterActor) void {
 
 // ---- Top bar ---------------------------------------------------------------------
 
+// ---- Wallpaper ------------------------------------------------------------------------
+
+var wallpaper_top = background_top;
+var wallpaper_bottom = background_bottom;
+var wallpaper_texture: ?*c.CoglTexture = null;
+
+fn color(rgba: u32) c.CoglColor {
+    return .{ .red = @truncate(rgba >> 24), .green = @truncate(rgba >> 16), .blue = @truncate(rgba >> 8), .alpha = @truncate(rgba) };
+}
+
+/// Applies the wallpaper setting: a built-in gradient or an image file.
+pub fn setWallpaper(name: [*:0]const u8) void {
+    if (wallpaper_texture) |t| c.g_object_unref(t);
+    wallpaper_texture = null;
+    var top: u32 = 0;
+    var bottom: u32 = 0;
+    if (c.cali_shell_wallpaper_gradient(name, &top, &bottom)) {
+        wallpaper_top = color(top);
+        wallpaper_bottom = color(bottom);
+    } else blk: {
+        var w: c_uint = 0;
+        var h: c_uint = 0;
+        const pixels = c.cali_shell_load_image(name, &w, &h) orelse {
+            std.log.warn("wallpaper: could not load {s}, using the default", .{name});
+            wallpaper_top = background_top;
+            wallpaper_bottom = background_bottom;
+            break :blk;
+        };
+        defer c.cali_shell_free_image(pixels, @as(usize, w) * h * 4);
+        const s = stage_actor orelse break :blk;
+        const ctx = c.clutter_backend_get_cogl_context(c.clutter_context_get_backend(c.clutter_actor_get_context(s)));
+        var err: ?*c.GError = null;
+        wallpaper_texture = c.cogl_texture_2d_new_from_data(ctx, @intCast(w), @intCast(h), @intCast(c.COGL_PIXEL_FORMAT_RGBA_8888_PRE), @intCast(w * 4), pixels, @ptrCast(&err));
+        if (err) |e| c.g_error_free(e);
+    }
+    if (background_group) |group| fillBackground(group);
+}
+
+// ---- Snap (tile) preview -----------------------------------------------------------------
+
+var tile_preview: ?*c.ClutterActor = null;
+
+/// Sookie asks to show where a dragged window will snap (half screen,
+/// maximized): an accent-colored rounded area that grows into place.
+fn showTilePreview(_: ?*c.MetaPlugin, window: ?*c.MetaWindow, tile_rect: ?*c.MtkRectangle, _: c_int) callconv(.C) void {
+    const s = stage_actor orelse return;
+    const rect = tile_rect orelse return;
+    const gap: f32 = 8;
+    const w = @as(f32, @floatFromInt(rect.*.width)) - 2 * gap;
+    const h = @as(f32, @floatFromInt(rect.*.height)) - 2 * gap;
+    if (w <= 0 or h <= 0) return;
+
+    if (tile_preview) |old| c.clutter_actor_destroy(old);
+    const accent = ui.accent;
+    const preview = ui.roundedRect(w, h, 16, (accent & 0xffffff00) | 0x55);
+    var from: c.MtkRectangle = undefined;
+    if (window) |win| c.meta_window_get_frame_rect(win, &from) else from = rect.*;
+    c.clutter_actor_set_position(preview, @floatFromInt(from.x), @floatFromInt(from.y));
+    c.clutter_actor_set_size(preview, @floatFromInt(from.width), @floatFromInt(from.height));
+    c.clutter_actor_set_opacity(preview, 0);
+    // Under the window being dragged (inside the window group), like GNOME.
+    const window_actor: ?*c.ClutterActor = if (window) |win| @ptrCast(@alignCast(c.meta_window_get_compositor_private(win))) else null;
+    if (window_actor) |wa| {
+        c.clutter_actor_insert_child_below(c.clutter_actor_get_parent(wa), preview, wa);
+    } else {
+        c.clutter_actor_insert_child_below(s, preview, panel);
+    }
+
+    ui.ease(preview, 150, c.CLUTTER_EASE_OUT_QUAD);
+    c.clutter_actor_set_position(preview, @as(f32, @floatFromInt(rect.*.x)) + gap, @as(f32, @floatFromInt(rect.*.y)) + gap);
+    c.clutter_actor_set_size(preview, w, h);
+    c.clutter_actor_set_opacity(preview, 255);
+    c.clutter_actor_restore_easing_state(preview);
+    tile_preview = preview;
+}
+
+fn hideTilePreview(_: ?*c.MetaPlugin) callconv(.C) void {
+    const preview = tile_preview orelse return;
+    tile_preview = null;
+    c.clutter_actor_destroy(preview);
+}
+
+fn debugSecondMonitor(_: c.gpointer) callconv(.C) c.gboolean {
+    const d = display orelse return 0;
+    if (c.meta_display_get_n_monitors(d) < 2) return 0;
+    if (c.meta_display_get_focus_window(d)) |w| c.meta_window_move_to_monitor(w, 1);
+    return 0;
+}
+
+/// CALI_DEBUG_TILE=<seconds>: shows the left-half snap preview for 4 seconds.
+fn debugTile(_: c.gpointer) callconv(.C) c.gboolean {
+    var rect = panel_rect;
+    rect.y += rect.height;
+    if (display) |d| {
+        var mon: c.MtkRectangle = undefined;
+        c.meta_display_get_monitor_geometry(d, c.meta_display_get_primary_monitor(d), &mon);
+        rect = .{ .x = mon.x, .y = mon.y + panel_rect.height, .width = @divTrunc(mon.width, 2), .height = mon.height - panel_rect.height };
+    }
+    showTilePreview(null, if (display) |d| c.meta_display_get_focus_window(d) else null, &rect, 0);
+    _ = c.g_timeout_add_seconds(4, &debugTileHide, null);
+    return 0;
+}
+
+fn debugTileHide(_: c.gpointer) callconv(.C) c.gboolean {
+    hideTilePreview(null);
+    return 0;
+}
+
+/// While locked, no keybinding does anything (they could reveal windows).
+fn keybindingFilter(_: ?*c.MetaPlugin, _: ?*c.MetaKeyBinding) callconv(.C) c.gboolean {
+    return @intFromBool(lock.locked);
+}
+
+// ---- Top bar -------------------------------------------------------------------------
+
+var clock_dot: ?*c.ClutterActor = null;
+var stage_actor: ?*c.ClutterActor = null;
+
+/// The small dot beside the clock that says there are notifications.
+pub fn setClockDot(visible: bool) void {
+    const dot = clock_dot orelse return;
+    if (visible) c.clutter_actor_show(dot) else c.clutter_actor_hide(dot);
+    placeClockDot();
+}
+
+fn placeClockDot() void {
+    const dot = clock_dot orelse return;
+    const text = clock orelse return;
+    const p = panel orelse return;
+    const x = (c.clutter_actor_get_width(p) + ui.preferredWidth(text)) / 2 + 8;
+    c.clutter_actor_set_position(dot, x, (c.clutter_actor_get_height(p) - 6) / 2);
+}
+
 fn createPanel(stage: ?*c.ClutterActor) void {
+    stage_actor = stage;
     const p = c.clutter_actor_new();
     c.clutter_actor_set_background_color(p, &panel_color);
 
@@ -187,6 +347,11 @@ fn createPanel(stage: ?*c.ClutterActor) void {
     c.clutter_actor_add_child(stage, p);
     panel = p;
     clock = text;
+
+    const dot = ui.roundedRect(6, 6, 3, 0xffffffff);
+    c.clutter_actor_hide(dot);
+    c.clutter_actor_add_child(p, dot);
+    clock_dot = dot;
     _ = tickClock(null);
 }
 
@@ -231,6 +396,7 @@ fn onWorkspaceAdded(_: ?*c.MetaWorkspaceManager, _: c_int, _: c.gpointer) callco
 /// Redraws the clock now (after its settings change).
 pub fn refreshClock() void {
     _ = tickClock(null);
+    placeClockDot();
 }
 
 fn tickClock(_: c.gpointer) callconv(.C) c.gboolean {

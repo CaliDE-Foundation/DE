@@ -44,6 +44,11 @@ pub var hot_corner_enabled = true;
 var entries: [max_windows]Entry = undefined;
 var n_entries: usize = 0;
 var layout_area = c.CaliRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
+/// Where each monitor's windows go (the primary one also has the search
+/// field and dock, so its area is `layout_area`).
+const max_monitors = 8;
+var monitor_areas: [max_monitors]c.CaliRect = undefined;
+var n_monitor_areas: usize = 0;
 
 /// What the overview shows: window cards, every app, or search results.
 const Mode = enum { windows, apps, search };
@@ -144,6 +149,7 @@ fn debugOpen(_: c.gpointer) callconv(.C) c.gboolean {
     if (state == .closed) open();
     // CALI_DEBUG_APPS=1 shows the app grid; CALI_DEBUG_SEARCH=<text> searches.
     if (std.posix.getenv("CALI_DEBUG_APPS") != null) setMode(.apps);
+    if (std.posix.getenv("CALI_DEBUG_APPMENU") != null) dock.debugMenu();
     if (std.posix.getenv("CALI_DEBUG_SEARCH")) |text| {
         query_len = @min(text.len, query_buf.len - 1);
         @memcpy(query_buf[0..query_len], text[0..query_len]);
@@ -204,12 +210,18 @@ fn open() void {
 
     // The dock sits at the bottom; windows get the space above it, with room
     // for their titles.
-    const dock_height = dock.create(d, g, stage_w, stage_h);
+    // The search field and dock belong to the primary monitor (with the bar).
+    var mon: c.MtkRectangle = undefined;
+    c.meta_display_get_monitor_geometry(d, primary, &mon);
+    const mon_x: f32 = @floatFromInt(mon.x);
+    const mon_w: f32 = @floatFromInt(mon.width);
+    const mon_bottom: f32 = @floatFromInt(mon.y + mon.height);
+    const dock_height = dock.create(d, g, mon_x, mon_w, mon_bottom);
     const work_top = @as(f32, @floatFromInt(work.y));
-    const work_bottom = @min(@as(f32, @floatFromInt(work.y + work.height)), stage_h - dock_height);
+    const work_bottom = @min(@as(f32, @floatFromInt(work.y + work.height)), mon_bottom - dock_height);
     // Search field at the top.
     const field = ui.roundedRect(search_w, search_h, search_h / 2, 0xffffff1f);
-    c.clutter_actor_set_position(field, (stage_w - search_w) / 2, work_top + search_gap);
+    c.clutter_actor_set_position(field, mon_x + (mon_w - search_w) / 2, work_top + search_gap);
     const glass = ui.icon("edit-find-symbolic", 16, true, 0xffffff);
     c.clutter_actor_set_position(glass, 14, (search_h - 16) / 2);
     c.clutter_actor_add_child(field, glass);
@@ -231,6 +243,23 @@ fn open() void {
         .width = @as(f32, @floatFromInt(work.width)) - 2 * margin,
         .height = work_bottom - top - 2 * margin - title_space,
     };
+
+    // The other monitors use their whole work area.
+    n_monitor_areas = @min(@as(usize, @intCast(c.meta_display_get_n_monitors(d))), max_monitors);
+    for (0..n_monitor_areas) |m| {
+        if (m == @as(usize, @intCast(primary))) {
+            monitor_areas[m] = layout_area;
+            continue;
+        }
+        var wa: c.MtkRectangle = undefined;
+        c.meta_workspace_get_work_area_for_monitor(workspace, @intCast(m), &wa);
+        monitor_areas[m] = .{
+            .x = @as(f32, @floatFromInt(wa.x)) + margin,
+            .y = @as(f32, @floatFromInt(wa.y)) + margin,
+            .width = @as(f32, @floatFromInt(wa.width)) - 2 * margin,
+            .height = @as(f32, @floatFromInt(wa.height)) - 2 * margin - title_space,
+        };
+    }
 
     // One card per window on this workspace, in stacking order.
     n_entries = 0;
@@ -321,15 +350,29 @@ fn makeCard(parent: ?*c.ClutterActor, actor: *c.ClutterActor, window: *c.MetaWin
     return .{ .item = item, .title = title, .close_button = button, .window = window, .from = from };
 }
 
-/// Places every card in the grid from cali-shell, animating there.
+/// Places every card in a grid from cali-shell on its own monitor,
+/// animating there.
 fn relayout() void {
-    var rects: [max_windows]c.CaliRect = undefined;
-    for (entries[0..n_entries], 0..) |entry, i| rects[i] = entry.from;
-    var targets: [max_windows]c.CaliRect = undefined;
-    const placed = c.cali_shell_overview_layout(layout_area, &rects, n_entries, &targets);
-    for (entries[0..placed], targets[0..placed]) |entry, to| {
-        animate(entry.item, to);
-        fade(entry.title, 255);
+    for (0..@max(n_monitor_areas, 1)) |m| {
+        var rects: [max_windows]c.CaliRect = undefined;
+        var which: [max_windows]usize = undefined;
+        var n: usize = 0;
+        for (entries[0..n_entries], 0..) |entry, i| {
+            var monitor: usize = @intCast(@max(c.meta_window_get_monitor(entry.window), 0));
+            if (monitor >= n_monitor_areas) monitor = 0;
+            if (monitor != m) continue;
+            rects[n] = entry.from;
+            which[n] = i;
+            n += 1;
+        }
+        if (n == 0) continue;
+        const area = if (n_monitor_areas == 0) layout_area else monitor_areas[m];
+        var targets: [max_windows]c.CaliRect = undefined;
+        const placed = c.cali_shell_overview_layout(area, &rects, n, &targets);
+        for (which[0..placed], targets[0..placed]) |i, to| {
+            animate(entries[i].item, to);
+            fade(entries[i].title, 255);
+        }
     }
 }
 
@@ -400,7 +443,8 @@ fn onKey(_: ?*c.ClutterActor, event: ?*c.ClutterEvent, _: c.gpointer) callconv(.
     switch (c.clutter_event_get_key_symbol(event)) {
         c.CLUTTER_KEY_Super_L, c.CLUTTER_KEY_Super_R => close(null),
         c.CLUTTER_KEY_Escape => {
-            // Step back: search/apps -> windows -> desktop.
+            // Step back: folder -> search/apps -> windows -> desktop.
+            if (mode == .apps and appgrid.closeFolder()) return 1;
             if (mode != .windows) {
                 query_len = 0;
                 updateQuery();
@@ -499,6 +543,7 @@ fn close(target: ?*c.MetaWindow) void {
     }
     dock.hide();
     appgrid.hide();
+    appgrid.reset();
 
     ease(dim);
     c.clutter_actor_set_opacity(dim, 0);

@@ -1,0 +1,6 @@
+#%PAM-1.0
+# Unlocking the Cali lock screen with the user's password. Distribution
+# packages may replace this with their own stack (system-auth, common-auth,
+# ...) to support fingerprints, LDAP and so on.
+auth     required  pam_unix.so
+account  required  pam_unix.so

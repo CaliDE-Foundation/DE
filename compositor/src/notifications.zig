@@ -1,6 +1,8 @@
-//! Notification banners. cali-notifyd (Go) speaks the freedesktop
-//! notification protocol and calls us over D-Bus (org.calide.Shell) to show
-//! and hide banners; clicking a banner dismisses it and tells cali-notifyd.
+//! Notifications. cali-notifyd (Go) speaks the freedesktop notification
+//! protocol and calls us over D-Bus (org.calide.Shell). We show a banner
+//! (unless Do Not Disturb is on or the screen is locked) and keep every
+//! notification in a list, shown in the calendar, until it is cleared or
+//! the app withdraws it. Clicking a banner dismisses it and tells cali-notifyd.
 
 const std = @import("std");
 const plugin = @import("plugin.zig");
@@ -25,6 +27,9 @@ const introspection =
     \\    <method name="HideNotification">
     \\      <arg direction="in" type="u" name="id"/>
     \\    </method>
+    \\    <method name="RemoveNotification">
+    \\      <arg direction="in" type="u" name="id"/>
+    \\    </method>
     \\    <signal name="NotificationDismissed">
     \\      <arg type="u" name="id"/>
     \\    </signal>
@@ -36,6 +41,72 @@ var stage: ?*c.ClutterActor = null;
 var connection: ?*c.GDBusConnection = null;
 var banner: ?*c.ClutterActor = null;
 var banner_id: u32 = 0;
+
+/// Do Not Disturb (from settings): no banners, the list still fills up.
+pub var do_not_disturb = false;
+
+// ---- The list --------------------------------------------------------------------------
+
+pub const max_items = 50;
+pub const Item = struct {
+    id: u32,
+    icon: [256]u8,
+    summary: [256]u8,
+    body: [512]u8,
+    time: [16]u8,
+};
+pub var items: [max_items]Item = undefined;
+pub var n_items: usize = 0;
+var local_id: u32 = 0x8000_0000; // ids for the shell's own notifications
+
+fn copyZ(dest: []u8, src: []const u8) void {
+    const n = @min(src.len, dest.len - 1);
+    @memcpy(dest[0..n], src[0..n]);
+    dest[n] = 0;
+}
+
+/// Adds to the top of the list (replacing an item with the same id).
+fn remember(id: u32, icon: []const u8, summary: []const u8, body: []const u8) void {
+    forget(id);
+    if (n_items == max_items) n_items -= 1;
+    std.mem.copyBackwards(Item, items[1 .. n_items + 1], items[0..n_items]);
+    var item: Item = undefined;
+    item.id = id;
+    copyZ(&item.icon, icon);
+    copyZ(&item.summary, summary);
+    copyZ(&item.body, body);
+    _ = c.cali_shell_format_date(0, 0, 0, "%H:%M", @ptrCast(&item.time), item.time.len);
+    items[0] = item;
+    n_items += 1;
+    changed();
+}
+
+fn forget(id: u32) void {
+    for (items[0..n_items], 0..) |item, i| {
+        if (item.id != id) continue;
+        std.mem.copyForwards(Item, items[i .. n_items - 1], items[i + 1 .. n_items]);
+        n_items -= 1;
+        changed();
+        return;
+    }
+}
+
+/// Empties the list (the calendar's Clear button).
+pub fn clearAll() void {
+    n_items = 0;
+    changed();
+}
+
+fn changed() void {
+    plugin.setClockDot(n_items > 0);
+    @import("calendar.zig").refresh();
+}
+
+/// A notification from the shell itself (e.g. "Screenshot captured").
+pub fn addLocal(app: [*:0]const u8, icon: [*:0]const u8, summary: [*:0]const u8, body: [*:0]const u8) void {
+    local_id +%= 1;
+    show(local_id, std.mem.span(app), std.mem.span(icon), summary, body);
+}
 
 pub fn init(s: ?*c.ClutterActor) void {
     stage = s;
@@ -96,13 +167,18 @@ fn onMethodCall(
         var id: u32 = 0;
         c.g_variant_get(params, "(u)", &id);
         if (id == banner_id) hide();
+    } else if (std.mem.eql(u8, name, "RemoveNotification")) {
+        var id: u32 = 0;
+        c.g_variant_get(params, "(u)", &id);
+        forget(id);
+        if (id == banner_id) hide();
     }
     c.g_dbus_method_invocation_return_value(invocation, null);
 }
 
 // ---- Banner -----------------------------------------------------------------------------------
 
-fn bannerIcon(app: []const u8, icon: [:0]const u8) *c.ClutterActor {
+pub fn bannerIcon(app: []const u8, icon: [:0]const u8, size: f32) *c.ClutterActor {
     // A desktop file ID: use that app's icon.
     if (std.mem.endsWith(u8, icon, ".desktop")) {
         if (c.g_desktop_app_info_new(icon.ptr)) |info| {
@@ -110,7 +186,7 @@ fn bannerIcon(app: []const u8, icon: [:0]const u8) *c.ClutterActor {
             if (c.g_app_info_get_icon(@ptrCast(@alignCast(info)))) |gicon| {
                 if (c.g_icon_to_string(gicon)) |s| {
                     defer c.g_free(s);
-                    return ui.icon(@import("dock.zig").iconName(std.mem.span(s)), icon_size, false, 0);
+                    return ui.icon(@import("dock.zig").iconName(std.mem.span(s)), size, false, 0);
                 }
             }
         }
@@ -118,12 +194,14 @@ fn bannerIcon(app: []const u8, icon: [:0]const u8) *c.ClutterActor {
     _ = app;
     if (icon.len > 0) {
         const symbolic = std.mem.endsWith(u8, icon, "-symbolic");
-        return ui.icon(icon.ptr, icon_size, symbolic, 0xffffff);
+        return ui.icon(icon.ptr, size, symbolic, 0xffffff);
     }
-    return ui.icon("dialog-information-symbolic", icon_size, true, 0xffffff);
+    return ui.icon("dialog-information-symbolic", size, true, 0xffffff);
 }
 
 fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, body: [*c]const u8) void {
+    remember(id, icon, std.mem.span(summary), std.mem.span(body));
+    if (do_not_disturb or @import("lock.zig").locked) return;
     const s = stage orelse return;
     if (banner) |old| c.clutter_actor_destroy(old);
 
@@ -140,7 +218,7 @@ fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, bod
     const height = @max(icon_size, title_h + 2 + text_h) + 2 * padding;
 
     const card = ui.roundedRect(width, height, 18, background);
-    const glyph = bannerIcon(app, icon);
+    const glyph = bannerIcon(app, icon, icon_size);
     c.clutter_actor_set_position(glyph, padding, (height - icon_size) / 2);
     c.clutter_actor_add_child(card, glyph);
     const block_y = (height - (title_h + 2 + text_h)) / 2;
@@ -168,7 +246,8 @@ fn show(id: u32, app: []const u8, icon: [:0]const u8, summary: [*c]const u8, bod
     banner_id = id;
 }
 
-fn hide() void {
+/// Takes the banner down (it stays in the list).
+pub fn hide() void {
     const card = banner orelse return;
     banner = null;
     banner_id = 0;
@@ -186,6 +265,7 @@ fn destroyWhenDone(actor: ?*c.ClutterActor, _: c.gpointer) callconv(.C) void {
 fn onBannerClicked(_: ?*c.ClutterActor, _: ?*c.ClutterEvent, _: c.gpointer) callconv(.C) c.gboolean {
     const id = banner_id;
     hide();
+    forget(id);
     if (connection) |conn| {
         _ = c.g_dbus_connection_emit_signal(conn, null, "/org/calide/Shell", "org.calide.Shell", "NotificationDismissed", c.g_variant_new("(u)", id), null);
     }

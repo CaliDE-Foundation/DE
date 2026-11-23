@@ -106,6 +106,25 @@ size_t cali_shell_format_date(int year, unsigned int month, unsigned int day /* 
 /* Search: higher is better, -1 = no match */
 int cali_shell_search_score(const char *query, const char *text);
 
+/* Screenshots */
+size_t cali_shell_screenshot_path(char *buf, size_t len);
+bool   cali_shell_save_png(const char *path, unsigned int width, unsigned int height,
+                           size_t stride, const unsigned char *data /* premultiplied RGBA */);
+
+/* Lock screen (PAM, checked on a thread) */
+size_t cali_shell_current_user(char *buf, size_t len);
+bool   cali_shell_auth_start(const char *password);
+int    cali_shell_auth_poll(void); /* -1 checking, 1 ok, 0 wrong, -2 idle */
+
+/* Wallpaper */
+bool           cali_shell_wallpaper_gradient(const char *name, unsigned int *top, unsigned int *bottom);
+unsigned char *cali_shell_load_image(const char *path, unsigned int *width, unsigned int *height);
+void           cali_shell_free_image(unsigned char *pixels, size_t len);
+
+/* Keyboard layouts, app folders */
+size_t      cali_shell_layout_short_name(const char *layout, char *buf, size_t len);
+const char *cali_shell_app_folder(const char *categories);
+
 /* Activities overview */
 size_t cali_shell_overview_layout(CaliRect area, const CaliRect *windows,
                                   size_t n, CaliRect *out);

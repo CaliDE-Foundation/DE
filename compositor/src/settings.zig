@@ -14,6 +14,8 @@ const iface = "org.calide.Settings";
 pub var dark_style = true;
 var clock_weekday = false;
 var clock_seconds = false;
+var idle_minutes: f64 = 5;
+var lock_on_idle = true;
 
 pub fn init() void {
     bus.subscribe(dest, iface, "Changed", &onChanged);
@@ -67,6 +69,25 @@ fn apply(key: [:0]const u8, value: ?*c.GVariant) void {
         clock_seconds = c.g_variant_get_boolean(value) != 0;
         c.cali_shell_set_clock_options(clock_weekday, clock_seconds);
         plugin.refreshClock();
+    } else if (eql(u8, key, "do-not-disturb") and is(value, "b")) {
+        @import("notifications.zig").do_not_disturb = c.g_variant_get_boolean(value) != 0;
+        @import("calendar.zig").refresh();
+    } else if (eql(u8, key, "idle-delay") and is(value, "d")) {
+        idle_minutes = c.g_variant_get_double(value);
+        @import("lock.zig").setIdle(idle_minutes, lock_on_idle);
+    } else if (eql(u8, key, "lock-on-idle") and is(value, "b")) {
+        lock_on_idle = c.g_variant_get_boolean(value) != 0;
+        @import("lock.zig").setIdle(idle_minutes, lock_on_idle);
+    } else if (eql(u8, key, "wallpaper") and is(value, "s")) {
+        plugin.setWallpaper(c.g_variant_get_string(value, null));
+    } else if (eql(u8, key, "keyboard-layouts") and is(value, "as")) {
+        var n: usize = 0;
+        const items = c.g_variant_get_strv(value, &n);
+        defer c.g_free(@ptrCast(items));
+        var names: [8][*:0]const u8 = undefined;
+        const count = @min(n, names.len);
+        for (0..count) |i| names[i] = items[i];
+        @import("keyboard.zig").setLayouts(names[0..count]);
     } else if (eql(u8, key, "dock-favorites") and is(value, "as")) {
         var n: usize = 0;
         const items = c.g_variant_get_strv(value, &n);
@@ -85,6 +106,7 @@ fn apply(key: [:0]const u8, value: ?*c.GVariant) void {
         }
         buf[len] = 0;
         c.cali_shell_set_dock_favorites(@ptrCast(&buf));
+        @import("dock.zig").rebuild();
     }
     std.log.debug("settings: {s} applied", .{key});
 }

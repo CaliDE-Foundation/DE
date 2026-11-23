@@ -129,3 +129,100 @@ func sign(f float64) float64 {
 	}
 	return 1
 }
+
+// WifiNetwork is one network in the Wi-Fi picker.
+type WifiNetwork struct {
+	SSID     string
+	Strength uint8 // 0-100
+	Active   bool
+	Secured  bool
+}
+
+// BluetoothDevice is one paired or nearby device.
+type BluetoothDevice struct {
+	Name      string
+	Path      string
+	Paired    bool
+	Connected bool
+}
+
+// SSID turns NetworkManager's raw SSID bytes into text ("" if hidden).
+func SSID(raw []byte) string {
+	return strings.ToValidUTF8(string(raw), "?")
+}
+
+// SortNetworks merges duplicate SSIDs (several access points, keeping the
+// strongest), drops hidden ones, and puts the active network first, then
+// the rest by strength.
+func SortNetworks(in []WifiNetwork) []WifiNetwork {
+	best := map[string]WifiNetwork{}
+	var order []string
+	for _, n := range in {
+		if n.SSID == "" {
+			continue
+		}
+		old, seen := best[n.SSID]
+		if !seen {
+			order = append(order, n.SSID)
+		}
+		if !seen || n.Strength > old.Strength {
+			n.Active = n.Active || old.Active
+			best[n.SSID] = n
+		} else if n.Active {
+			old.Active = true
+			best[n.SSID] = old
+		}
+	}
+	out := make([]WifiNetwork, 0, len(best))
+	for _, ssid := range order {
+		out = append(out, best[ssid])
+	}
+	sortStable(out, func(a, b WifiNetwork) bool {
+		if a.Active != b.Active {
+			return a.Active
+		}
+		return a.Strength > b.Strength
+	})
+	return out
+}
+
+// SignalIcon is the symbolic icon for a signal strength.
+func SignalIcon(strength uint8) string {
+	switch {
+	case strength >= 75:
+		return "network-wireless-signal-excellent-symbolic"
+	case strength >= 50:
+		return "network-wireless-signal-good-symbolic"
+	case strength >= 25:
+		return "network-wireless-signal-ok-symbolic"
+	default:
+		return "network-wireless-signal-weak-symbolic"
+	}
+}
+
+func sortStable[T any](s []T, less func(a, b T) bool) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && less(s[j], s[j-1]); j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+// Fake returns made-up networks and devices, for testing the shell
+// without hardware (CALI_STATUS_FAKE=1).
+func Fake() (Status, []WifiNetwork, []BluetoothDevice) {
+	st := Status{Network: NetWifi, WifiAvailable: true, WifiEnabled: true,
+		BluetoothAvailable: true, BluetoothEnabled: true,
+		Volume: 0.55, Battery: 0.72, Charging: false, Brightness: 0.8}
+	nets := SortNetworks([]WifiNetwork{
+		{SSID: "Cali Home", Strength: 82, Active: true, Secured: true},
+		{SSID: "Coffee Shop", Strength: 61},
+		{SSID: "Neighbors 5G", Strength: 38, Secured: true},
+		{SSID: "Library", Strength: 24},
+	})
+	devs := []BluetoothDevice{
+		{Name: "Headphones", Path: "/fake/dev_1", Paired: true, Connected: true},
+		{Name: "Keyboard", Path: "/fake/dev_2", Paired: true},
+	}
+	return st, nets, devs
+}

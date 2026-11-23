@@ -63,3 +63,38 @@ func TestMiscHelpers(t *testing.T) {
 		t.Error("Unknown should mark levels as unavailable")
 	}
 }
+
+func TestSortNetworks(t *testing.T) {
+	got := SortNetworks([]WifiNetwork{
+		{SSID: "B", Strength: 40},
+		{SSID: "", Strength: 99},
+		{SSID: "A", Strength: 30, Active: true},
+		{SSID: "B", Strength: 70},
+		{SSID: "C", Strength: 90},
+	})
+	want := []string{"A", "C", "B"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d networks, want %d", len(got), len(want))
+	}
+	for i, n := range got {
+		if n.SSID != want[i] {
+			t.Errorf("position %d: %s, want %s", i, n.SSID, want[i])
+		}
+	}
+	if got[2].Strength != 70 {
+		t.Errorf("duplicate SSID should keep the strongest, got %d", got[2].Strength)
+	}
+}
+
+func TestSSIDAndIcons(t *testing.T) {
+	if SSID([]byte("Caf\xc3\xa9")) != "Café" || SSID([]byte{0xff}) != "?" {
+		t.Error("SSID decoding")
+	}
+	if SignalIcon(90) != "network-wireless-signal-excellent-symbolic" || SignalIcon(10) != "network-wireless-signal-weak-symbolic" {
+		t.Error("SignalIcon")
+	}
+	st, nets, devs := Fake()
+	if !st.WifiAvailable || len(nets) == 0 || !nets[0].Active || len(devs) == 0 {
+		t.Error("Fake data should describe a connected laptop")
+	}
+}
