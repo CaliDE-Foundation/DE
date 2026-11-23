@@ -1,0 +1,49 @@
+name: Arch packages
+
+# Builds packaging/arch's PKGBUILDs the way an Arch user would (makepkg in
+# an up-to-date Arch container), so they don't rot. Weekly, by hand, and
+# when they change.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 6 * * 3"
+  push:
+    branches: [main]
+    paths: ["packaging/arch/**", ".github/workflows/arch.yml"]
+
+jobs:
+  makepkg:
+    name: makepkg (Arch Linux)
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 120
+    steps:
+      - name: Set up a build user
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git sudo
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build and install sookie-git
+        run: |
+          cp -r packaging/arch /home/builder/pkgs && chown -R builder /home/builder/pkgs
+          cd /home/builder/pkgs/sookie-git
+          sudo -u builder makepkg --syncdeps --install --noconfirm
+
+      - name: Build calide-git
+        run: |
+          cd /home/builder/pkgs/calide-git
+          sudo -u builder makepkg --syncdeps --noconfirm
+
+      - name: Check the packages
+        run: |
+          pacman -Qip /home/builder/pkgs/*/*.pkg.tar.zst | grep -E "^(Name|Version|Installed Size)"
+          pacman -Qlp /home/builder/pkgs/calide-git/*.pkg.tar.zst | grep -E "bin/|wayland-sessions|extensions/"
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: arch-packages
+          path: /home/builder/pkgs/*/*.pkg.tar.zst
+          retention-days: 14

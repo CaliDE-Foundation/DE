@@ -1,6 +1,6 @@
 # Maintainer: CaliDE Foundation
-# Building needs Zig 0.13 exactly (newer Zig changed its build API); get it
-# from the AUR (zig013-bin) or zigup if your zig is newer.
+# Cali builds with Zig 0.13 exactly (newer Zig changed its build API), so
+# this fetches that Zig for the build instead of using Arch's.
 pkgname=calide-git
 pkgver=r0
 pkgrel=1
@@ -12,12 +12,17 @@ depends=(sookie dbus glib2 gtk4 libadwaita pam pipewire wireplumber
          xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk)
 optdepends=('networkmanager: Wi-Fi and network status'
             'bluez: Bluetooth'
-            'upower: battery status')
-makedepends=(git rust go zig)
+            'upower: battery status'
+            'orca: screen reader'
+            'mate-polkit: password prompts for admin tasks'
+            'python-gobject: the bundled CPU Monitor extension')
+makedepends=(git rust go)
 provides=(calide)
 conflicts=(calide)
-source=("git+https://github.com/CaliDE-Foundation/DE.git")
-sha256sums=(SKIP)
+source=("git+https://github.com/CaliDE-Foundation/DE.git"
+        "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz")
+sha256sums=(SKIP
+            d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea)
 
 pkgver() {
   cd DE
@@ -25,6 +30,7 @@ pkgver() {
 }
 
 build() {
+  export PATH="$srcdir/zig-linux-x86_64-0.13.0:$PATH"
   cd DE
   make NICE= JOBS="$(nproc)" compositor-sookie services settings-app
 }
