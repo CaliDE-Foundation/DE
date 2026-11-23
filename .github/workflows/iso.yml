@@ -105,6 +105,13 @@ jobs:
             --volid CaliDE-Live-45 --iso-only --iso-name calide-live-x86_64.iso \
             --logfile /tmp/lmc.log
           ls -lh /tmp/result
+          size=$(stat -c %s /tmp/result/calide-live-x86_64.iso)
+          limit=$((2 * 1024 * 1024 * 1024 - 1))
+          echo "ISO size: $((size / 1024 / 1024)) MiB (release limit 2048 MiB)"
+          if [ "$size" -gt "$limit" ]; then
+            echo "::error::ISO is over GitHub's 2 GiB release asset limit; trim packaging/iso/calide-live.ks"
+            exit 1
+          fi
           cd /tmp/result && sha256sum calide-live-x86_64.iso > calide-live-x86_64.iso.sha256
 
       - name: Upload the ISO

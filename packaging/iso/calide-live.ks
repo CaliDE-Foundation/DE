@@ -24,11 +24,13 @@ url --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=fedora-45&arc
 repo --name=fedora-updates --mirrorlist=https://mirrors.fedoraproject.org/mirrorlist?repo=updates-released-f45&arch=x86_64
 repo --name=cali --baseurl=file:///cali-repo
 
-%packages
+# GitHub release assets must stay under 2 GiB, so the image carries no docs,
+# no printing stack and only the core fonts. The workflow fails the build if
+# the ISO grows past the limit again.
+%packages --excludedocs
 # Live system and installer
 kernel
 kernel-modules
-kernel-modules-extra
 dracut-live
 dracut-config-generic
 livesys-scripts
@@ -46,10 +48,14 @@ efibootmgr
 # Base system
 @core
 @hardware-support
-@fonts
 @multimedia
 @networkmanager-submodules
-@printing
+# Core fonts only; @fonts pulls in the CJK families (hundreds of MB).
+default-fonts-core-sans
+default-fonts-core-serif
+default-fonts-core-mono
+default-fonts-core-emoji
+default-fonts-core-math
 
 # Cali, with GNOME's login screen and apps (GNOME users feel at home)
 calide
