@@ -160,6 +160,8 @@ fn open() void {
     show(rows[0..n], true);
 }
 
+const Toggle = struct { label: [*:0]const u8, icon: [*:0]const u8, on: bool, available: bool, which: usize };
+
 /// Replaces the menu content with `rows`, below the quick settings if
 /// `quick` (opening the menu if needed).
 fn show(rows: []const Row, quick: bool) void {
@@ -169,7 +171,22 @@ fn show(rows: []const Row, quick: bool) void {
     c.clutter_actor_get_size(s, &stage_w, &stage_h);
 
     const inner_w = style.width - 2 * style.padding;
-    const quick_h: f32 = if (quick) slider_h + 2 * (toggle_h + toggle_gap) + 14 else 0;
+    // Like GNOME, only tiles for hardware that exists: no Wi-Fi or Bluetooth
+    // tile on a desktop (or VM) without the adapter.
+    const all = [_]Toggle{
+        .{ .label = "Wi-Fi", .icon = "network-wireless-symbolic", .on = status.current.wifi_enabled, .available = status.current.wifi_available, .which = 1 },
+        .{ .label = "Bluetooth", .icon = "bluetooth-active-symbolic", .on = status.current.bluetooth_enabled, .available = status.current.bluetooth_available, .which = 2 },
+        .{ .label = "Dark Style", .icon = "weather-clear-night-symbolic", .on = settings.dark_style, .available = true, .which = 3 },
+    };
+    var toggles: [all.len]Toggle = undefined;
+    var n_toggles: usize = 0;
+    for (all) |t| {
+        if (!t.available) continue;
+        toggles[n_toggles] = t;
+        n_toggles += 1;
+    }
+    const toggle_rows: f32 = @floatFromInt((n_toggles + 1) / 2);
+    const quick_h: f32 = if (quick) slider_h + toggle_rows * (toggle_h + toggle_gap) + 14 else 0;
     const n: f32 = @floatFromInt(rows.len);
     const height = quick_h + n * style.row_height + 2 * style.padding;
     const p = ui.roundedRect(style.width, height, config.radius(1), style.background);
@@ -181,17 +198,12 @@ fn show(rows: []const Row, quick: bool) void {
         addVolumeSlider(p, style.padding, y, inner_w);
         y += slider_h;
         const tw = (inner_w - toggle_gap) / 2;
-        const toggles = [_]struct { label: [*:0]const u8, icon: [*:0]const u8, on: bool, available: bool, which: usize }{
-            .{ .label = "Wi-Fi", .icon = "network-wireless-symbolic", .on = status.current.wifi_enabled, .available = status.current.wifi_available, .which = 1 },
-            .{ .label = "Bluetooth", .icon = "bluetooth-active-symbolic", .on = status.current.bluetooth_enabled, .available = status.current.bluetooth_available, .which = 2 },
-            .{ .label = "Dark Style", .icon = "weather-clear-night-symbolic", .on = settings.dark_style, .available = true, .which = 3 },
-        };
-        for (toggles, 0..) |t, i| {
+        for (toggles[0..n_toggles], 0..) |t, i| {
             const x = style.padding + @as(f32, @floatFromInt(i % 2)) * (tw + toggle_gap);
             const ty = y + @as(f32, @floatFromInt(i / 2)) * (toggle_h + toggle_gap);
             addToggle(p, x, ty, tw, t.label, t.icon, t.on, t.available, t.which);
         }
-        y += 2 * (toggle_h + toggle_gap);
+        y += toggle_rows * (toggle_h + toggle_gap);
         const line = c.clutter_actor_new();
         c.clutter_actor_set_background_color(line, &c.CoglColor{ .red = 255, .green = 255, .blue = 255, .alpha = 26 });
         c.clutter_actor_set_position(line, style.padding + 6, y + 6);
