@@ -68,6 +68,9 @@ var display: ?*c.MetaDisplay = null;
 var background_group: ?*c.ClutterActor = null;
 var panel: ?*c.ClutterActor = null;
 var clock: ?*c.ClutterActor = null;
+/// A plain actor over the clock that takes its clicks (opens the calendar).
+/// Clicks on the ClutterText itself never opened it.
+var clock_hit: ?*c.ClutterActor = null;
 var panel_rect = c.MtkRectangle{ .x = 0, .y = 0, .width = 0, .height = 0 };
 
 
@@ -132,7 +135,7 @@ fn start(plugin: ?*c.MetaPlugin) callconv(.C) void {
     @import("panelitems.zig").init(panel);
     @import("deskdock.zig").init(d, stage);
     @import("gestures.zig").init(d, stage);
-    calendar.init(stage, clock);
+    calendar.init(stage, clock_hit);
     switcher.init(d, stage);
     notifications.init(stage);
     osd.init(stage);
@@ -392,6 +395,7 @@ fn placeClockDot() void {
             .right => -(statusmenu.iconsWidth() + @import("panelitems.zig").width() + 32),
         };
         c.clutter_actor_set_translation(text, shift, 0, 0);
+        if (clock_hit) |hit| c.clutter_actor_set_translation(hit, shift, 0, 0);
     }
     var tx: f32 = 0;
     var ty: f32 = 0;
@@ -407,6 +411,7 @@ fn createPanel(stage: ?*c.ClutterActor) void {
     c.clutter_actor_set_background_color(p, &panel_color);
 
     const text = c.clutter_text_new_full(config.font(.bold, 0), "", &panel_text_color);
+    ui.plainText(text);
     c.clutter_actor_add_child(p, text);
     const x_align = c.clutter_align_constraint_new(p, @intCast(c.CLUTTER_ALIGN_X_AXIS), 0.5);
     c.clutter_actor_add_constraint(text, x_align);
@@ -421,6 +426,11 @@ fn createPanel(stage: ?*c.ClutterActor) void {
     c.clutter_actor_hide(dot);
     c.clutter_actor_add_child(p, dot);
     clock_dot = dot;
+
+    const hit = c.clutter_actor_new();
+    c.clutter_actor_add_constraint(hit, c.clutter_bind_constraint_new(text, @intCast(c.CLUTTER_BIND_ALL), 0));
+    c.clutter_actor_add_child(p, hit);
+    clock_hit = hit;
     _ = tickClock(null);
 }
 

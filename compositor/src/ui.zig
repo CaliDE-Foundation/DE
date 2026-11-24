@@ -115,7 +115,17 @@ pub const white = c.CoglColor{ .red = 255, .green = 255, .blue = 255, .alpha = 2
 pub fn label(text: [*:0]const u8, font: [*:0]const u8) *c.ClutterActor {
     const actor = c.clutter_text_new_full(font, text, &white);
     c.clutter_text_set_ellipsize(@ptrCast(@alignCast(actor)), @intCast(c.PANGO_ELLIPSIZE_END));
+    plainText(actor);
     return actor;
+}
+
+/// ClutterText is selectable by default: a click on a reactive label takes
+/// key focus, shows a caret and grabs the pointer, which ate clicks meant to
+/// open popups (the clock didn't open the calendar). Labels are just text.
+pub fn plainText(actor: ?*c.ClutterActor) void {
+    const t: *c.ClutterText = @ptrCast(@alignCast(actor));
+    c.clutter_text_set_selectable(t, 0);
+    c.clutter_text_set_cursor_visible(t, 0);
 }
 
 pub fn preferredWidth(actor: ?*c.ClutterActor) f32 {
