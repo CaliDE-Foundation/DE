@@ -26,8 +26,13 @@ settings-app:
 	$(NICE) cargo build --release -j $(JOBS) -p cali-settings
 	cp $${CARGO_TARGET_DIR:-target}/release/cali-settings $(OUT)/
 
+# Packages run on any x86-64 machine: target the baseline CPU, not the build
+# machine's (a CI runner with AVX-512 made cali-compositor die with SIGILL on
+# CPUs without it). ReleaseSafe keeps Zig's safety checks but runs fast.
+ZIGFLAGS ?= -Dcpu=baseline -Doptimize=ReleaseSafe
+
 compositor: shell
-	cd compositor && $(NICE) zig build -j$(JOBS) --prefix ../out
+	cd compositor && $(NICE) zig build -j$(JOBS) $(ZIGFLAGS) --prefix ../out
 
 services:
 	mkdir -p $(OUT)
@@ -51,7 +56,7 @@ sookie-fetch:
 # exists, otherwise a system-wide Sookie install.
 compositor-sookie: shell
 	cd compositor && PKG_CONFIG_PATH=$(SOOKIE_PC)$${PKG_CONFIG_PATH:+:$$PKG_CONFIG_PATH} \
-	  $(NICE) zig build -j$(JOBS) -Dsookie=true --prefix ../out
+	  $(NICE) zig build -j$(JOBS) $(ZIGFLAGS) -Dsookie=true --prefix ../out
 
 # Start the Sookie build headless for a few seconds. Needs Sookie installed
 # system-wide (it loads its plugins from /usr), so run it inside `make container`.
@@ -106,7 +111,7 @@ devkit: container-image
 # Container-only helpers: same as above, with container output folders.
 compositor-sookie-container:
 	cargo build --release -j $(JOBS)
-	cd compositor && $(NICE) zig build -j$(JOBS) -Dsookie=true \
+	cd compositor && $(NICE) zig build -j$(JOBS) $(ZIGFLAGS) -Dsookie=true \
 	  -Dshell-lib=$$CARGO_TARGET_DIR/release/libcali_shell.a --prefix ../out/container
 smoke-sookie-container:
 	scripts/smoke-sookie.sh out/container/bin/cali-compositor
