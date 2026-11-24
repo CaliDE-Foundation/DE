@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src=".github/assets/cali.svg" width="96" alt="">
-
 # Cali
 
 A desktop that feels like GNOME and lets you make it yours.
