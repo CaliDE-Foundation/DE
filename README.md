@@ -22,3 +22,17 @@ make devkit     # run Cali in a window (podman)
 Change settings with **Cali Settings** or `calictl set accent-color teal`; they apply right away.
 
 Built on [Sookie](https://github.com/CaliDE-Foundation/Sookie). GPL-3.0-or-later.
+
+### Experimental Layer Shell in Devkit
+
+Once Sookie's development release (`nightly-dev`) has been published by
+its build and test jobs, start an isolated Devkit from the CALI checkout:
+
+```sh
+make devkit SOOKIE_EXPERIMENTAL_LAYER_SHELL=1 CALI_APP=alacritty
+```
+
+In the nested terminal, run `wayland-info | grep zwlr_layer_shell`.
+If the global is advertised, try `waybar`. This is experimental;
+use a disposable session and do not enter sensitive credentials.
+Plain `make devkit` continues to use the main-channel Sookie release.

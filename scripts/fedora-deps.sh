@@ -34,6 +34,7 @@ if [ "${1:-}" = "--desktop" ]; then
     gtk4 libadwaita libei pipewire wireplumber \
     mesa-dri-drivers mesa-libEGL mesa-vulkan-drivers \
     adwaita-sans-fonts adwaita-icon-theme gnome-text-editor \
+    alacritty wayland-utils waybar \
     gtk4-devel libadwaita-devel \
     xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk dconf \
     python3-gobject
