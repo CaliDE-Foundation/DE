@@ -100,7 +100,7 @@ PODMAN_TTY   ?= -it
 
 devkit: container-image
 	@test -S "$(HOST_WAYLAND)" || { echo "devkit: run this from a Wayland session"; exit 1; }
-	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri \
+	$(CONTAINER_RUN) $(PODMAN_TTY) --device /dev/dri --tz=local \
 	  -v $(HOST_WAYLAND):/run/host-wayland.sock \
 	  -e WAYLAND_DISPLAY=/run/host-wayland.sock \
 	  -e SOOKIE_URL="$(SOOKIE_DEVKIT_URL)" \

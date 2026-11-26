@@ -94,8 +94,12 @@ pub fn format_date(date: Option<(i32, u32, u32)>, format: &CStr) -> String {
         tm.tm_isdst = -1;
         unsafe { mktime(&mut tm) }; // fills in the weekday
     }
+    format_tm(&tm, format)
+}
+
+fn format_tm(tm: &Tm, format: &CStr) -> String {
     let mut buf = [0 as c_char; 128];
-    let n = unsafe { strftime(buf.as_mut_ptr(), buf.len(), format.as_ptr(), &tm) };
+    let n = unsafe { strftime(buf.as_mut_ptr(), buf.len(), format.as_ptr(), tm) };
     let bytes: Vec<u8> = buf[..n].iter().map(|&b| b as u8).collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
@@ -128,6 +132,26 @@ mod tests {
         assert_eq!(format_date(day, &clock_format(true, true, false, true)).split_whitespace().next(), Some("Sun"));
         assert!(clock_format(false, true, true, true).to_str().unwrap().ends_with("%S"));
         assert_eq!(clock_format(false, false, false, false).to_str().unwrap(), "%-I:%M %p");
+    }
+
+    #[test]
+    fn clock_formats_midnight_noon_and_evening() {
+        // Fixed local wall-clock values, independent of the machine's timezone.
+        let mut tm: Tm = unsafe { std::mem::zeroed() };
+        tm.tm_min = 45;
+        tm.tm_sec = 9;
+        for (hour, h24, h12) in [
+            (0, "00:45", "12:45 AM"),
+            (12, "12:45", "12:45 PM"),
+            (20, "20:45", "8:45 PM"),
+            (23, "23:45", "11:45 PM"),
+        ] {
+            tm.tm_hour = hour;
+            assert_eq!(format_tm(&tm, &clock_format(false, false, false, true)), h24);
+            assert_eq!(format_tm(&tm, &clock_format(false, false, false, false)), h12);
+        }
+        assert_eq!(format_tm(&tm, &clock_format(false, false, true, true)), "23:45:09");
+        assert_eq!(format_tm(&tm, &clock_format(false, false, true, false)), "11:45:09 PM");
     }
 
     #[test]
