@@ -36,3 +36,19 @@ In the nested terminal, run `wayland-info | grep zwlr_layer_shell`.
 If the global is advertised, try `waybar`. This is experimental;
 use a disposable session and do not enter sensitive credentials.
 Plain `make devkit` continues to use the main-channel Sookie release.
+
+### Experimental native Wayland decorations
+
+Use the development Sookie build with negotiated SSD, not the visual preview:
+
+```sh
+make devkit SOOKIE_EXPERIMENTAL_SSD=1 CALI_APP=alacritty
+```
+
+Inside the nested session, run `scripts/test-ssd.sh`. It opens an isolated
+Alacritty test window and checks the actual decoration configure event in the
+Wayland trace when that window closes. Mode 2 confirms server-side negotiation;
+mode 1 indicates client-side decorations. Verify titlebar count, movement,
+resize edges, minimize/restore, maximize/restore and closing manually. The
+script does not claim visual or input conformance. The temporary trace is
+removed on exit; avoid entering sensitive information in the test session.
